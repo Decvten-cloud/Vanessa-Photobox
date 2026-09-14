@@ -1,0 +1,6 @@
+:root { font-family: 'Trebuchet MS', Arial, sans-serif; color: #26202b; background: #f8f4ee; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+
+#root { min-height: 100svh; }
+
+body { margin: 0; }
+button { font: inherit; }

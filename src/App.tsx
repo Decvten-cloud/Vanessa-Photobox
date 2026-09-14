@@ -1,0 +1,706 @@
+import { useEffect, useRef, useState } from 'react'
+import './App.css'
+
+type Step =
+  | 'landing'
+  | 'permission'
+  | 'template'
+  | 'countdown'
+  | 'capture'
+  | 'confirm'
+  | 'review'
+
+type Photo = {
+  id: number
+  src: string
+  label: string
+}
+
+type Sticker = {
+  id: string
+  symbol: string
+  x: number
+  y: number
+}
+
+const frameColors = [
+  { name: 'Blush', value: '#f4b6cc' },
+  { name: 'Rose', value: '#df7fa8' },
+  { name: 'Lavender', value: '#d4c5ed' },
+  { name: 'Powder blue', value: '#b9dff0' },
+  { name: 'Sky blue', value: '#8fc8e5' },
+  { name: 'Night blue', value: '#293b5f' },
+]
+
+const stickerOptions = ['✦', '♡', '☀', '✿', '✧', 'V']
+
+const cameraIcon = (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M4 7.5h3l1.4-2h3.2l1.4 2H16a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3Z" />
+    <circle cx="10" cy="13.5" r="3.2" />
+    <path d="M16 11h.01" />
+  </svg>
+)
+
+function App() {
+  const [step, setStep] = useState<Step>('landing')
+  const [templateCount, setTemplateCount] = useState(4)
+  const [photos, setPhotos] = useState<Photo[]>([])
+  const [currentShot, setCurrentShot] = useState(0)
+  const [countdown, setCountdown] = useState(5)
+  const [flashActive, setFlashActive] = useState(false)
+  const [retakeIndex, setRetakeIndex] = useState<number | null>(null)
+  const [pendingPhoto, setPendingPhoto] = useState<Photo | null>(null)
+  const [cameraOn, setCameraOn] = useState(false)
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([])
+  const [selectedDeviceId, setSelectedDeviceId] = useState('')
+  const [frameColor, setFrameColor] = useState(frameColors[0].value)
+  const [stickers, setStickers] = useState<Sticker[]>([])
+  const [error, setError] = useState('')
+
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const uploadRef = useRef<HTMLInputElement>(null)
+
+  const findCameraDevices = async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return
+
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const cameras = devices.filter((device) => device.kind === 'videoinput')
+
+    setCameraDevices(cameras)
+    setSelectedDeviceId((current) => {
+      const currentDeviceIsAvailable = cameras.some(
+        (camera) => camera.deviceId === current,
+      )
+
+      return current && currentDeviceIsAvailable
+        ? current
+        : cameras[0]?.deviceId ?? ''
+    })
+  }
+
+  useEffect(() => {
+    navigator.mediaDevices?.addEventListener('devicechange', findCameraDevices)
+
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      navigator.mediaDevices?.removeEventListener('devicechange', findCameraDevices)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (cameraOn && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current
+    }
+  }, [cameraOn, step])
+
+  const startCamera = async (deviceId = selectedDeviceId) => {
+    setError('')
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Camera access is not supported in this browser.')
+      return false
+    }
+
+    try {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: deviceId
+          ? { deviceId: { exact: deviceId } }
+          : { facingMode: 'user' },
+        audio: false,
+      })
+
+      streamRef.current = stream
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+
+      setCameraOn(true)
+      await findCameraDevices()
+      return true
+    } catch {
+      setError('Camera access was blocked. Please allow camera access to continue.')
+      return false
+    }
+  }
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setCameraOn(false)
+  }
+
+  const beginPhotobox = () => {
+    setError('')
+    setStep('permission')
+  }
+
+  const allowCamera = async () => {
+    if (await startCamera()) {
+      setStep('template')
+    }
+  }
+
+  const chooseTemplate = (count: number) => {
+    setTemplateCount(count)
+    setPhotos([])
+    setCurrentShot(0)
+    setRetakeIndex(null)
+    setPendingPhoto(null)
+    setCountdown(5)
+    setStep('capture')
+  }
+
+  const beginCapture = () => {
+    setError('')
+    setCountdown(5)
+    setStep('countdown')
+  }
+
+  const captureFromCamera = () => {
+    const video = videoRef.current
+
+    if (!video || video.readyState < 2 || !video.videoWidth) {
+      return null
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+    return canvas.toDataURL('image/jpeg', 0.92)
+  }
+
+  useEffect(() => {
+    if (step !== 'countdown') return
+
+    if (countdown > 0) {
+      const timer = window.setTimeout(
+        () => setCountdown((value) => value - 1),
+        900,
+      )
+
+      return () => window.clearTimeout(timer)
+    }
+
+    const timer = window.setTimeout(() => {
+      const captured = captureFromCamera()
+
+      if (!captured) {
+        setError('The camera preview is not ready yet. Please try again.')
+        setStep('capture')
+        return
+      }
+
+      const photo: Photo = {
+        id: Date.now(),
+        src: captured,
+        label: `Photo ${currentShot + 1}`,
+      }
+
+      setFlashActive(true)
+      window.setTimeout(() => setFlashActive(false), 220)
+      setPendingPhoto(photo)
+      setStep('confirm')
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [countdown, currentShot, retakeIndex, step, templateCount])
+
+  const acceptPendingPhoto = () => {
+    if (!pendingPhoto) return
+
+    if (retakeIndex !== null) {
+      setPhotos((current) =>
+        current.map((item, index) =>
+          index === retakeIndex ? pendingPhoto : item,
+        ),
+      )
+      setRetakeIndex(null)
+      setPendingPhoto(null)
+      setStep('review')
+      return
+    }
+
+    setPhotos((current) => [...current, pendingPhoto])
+    setPendingPhoto(null)
+
+    if (currentShot + 1 >= templateCount) {
+      setStep('review')
+    } else {
+      setCurrentShot((shot) => shot + 1)
+      setCountdown(5)
+      setStep('countdown')
+    }
+  }
+
+  const rejectPendingPhoto = () => {
+    setPendingPhoto(null)
+    setCountdown(5)
+    setStep('countdown')
+  }
+
+  const startRetake = (index: number) => {
+    setRetakeIndex(index)
+    setPendingPhoto(null)
+    setCurrentShot(index)
+    setCountdown(5)
+    setStep('countdown')
+  }
+
+  const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    if (!file || !file.type.startsWith('image/')) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const photo: Photo = {
+        id: Date.now(),
+        src: String(reader.result),
+        label: 'Uploaded photo',
+      }
+
+      setPhotos((current) =>
+        current.length < templateCount ? [...current, photo] : current,
+      )
+      setStep('review')
+    }
+
+    reader.readAsDataURL(file)
+    event.target.value = ''
+  }
+
+  const downloadStrip = async () => {
+    if (!photos.length) return
+
+    const canvas = document.createElement('canvas')
+    const width = 720
+    const padding = 28
+    const photoHeight = 430
+    const gap = 18
+
+    canvas.width = width
+    canvas.height =
+      padding * 2 +
+      photos.length * photoHeight +
+      (photos.length - 1) * gap +
+      100
+
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    context.fillStyle = frameColor
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#29344f'
+    context.textAlign = 'center'
+    context.font = '500 22px Arial'
+    context.fillText("VANESSA'S PHOTOBOX", width / 2, canvas.height - 48)
+    context.font = '32px Arial'
+
+    stickers.forEach((sticker) => {
+      context.fillText(
+        sticker.symbol,
+        (sticker.x / 100) * width,
+        (sticker.y / 100) * canvas.height,
+      )
+    })
+
+    for (const [index, photo] of photos.entries()) {
+      const image = new Image()
+      image.src = photo.src
+
+      await new Promise<void>((resolve) => {
+        image.onload = () => resolve()
+        image.onerror = () => resolve()
+      })
+
+      const y = padding + index * (photoHeight + gap)
+      const scale = Math.max(
+        (width - padding * 2) / image.width,
+        photoHeight / image.height,
+      )
+      const imageWidth = image.width * scale
+      const imageHeight = image.height * scale
+
+      context.save()
+      context.beginPath()
+      context.rect(padding, y, width - padding * 2, photoHeight)
+      context.clip()
+      context.drawImage(
+        image,
+        (width - imageWidth) / 2,
+        y + (photoHeight - imageHeight) / 2,
+        imageWidth,
+        imageHeight,
+      )
+      context.restore()
+    }
+
+    const link = document.createElement('a')
+    link.href = canvas.toDataURL('image/png')
+    link.download = 'vanessas-photobox-strip.png'
+    link.click()
+  }
+
+  const toggleSticker = (symbol: string) => {
+    setStickers((current) => {
+      const existingSticker = current.find((sticker) => sticker.symbol === symbol)
+
+      if (existingSticker) {
+        return current.filter((sticker) => sticker.id !== existingSticker.id)
+      }
+
+      const offset = current.length * 12
+      return [
+        ...current,
+        {
+          id: `${symbol}-${Date.now()}`,
+          symbol,
+          x: 12 + offset,
+          y: 94,
+        },
+      ]
+    })
+  }
+
+  const moveSticker = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
+    const strip = event.currentTarget.closest('.strip-preview')
+    if (!strip || event.buttons !== 1) return
+
+    const bounds = strip.getBoundingClientRect()
+    const x = Math.max(3, Math.min(97, ((event.clientX - bounds.left) / bounds.width) * 100))
+    const y = Math.max(3, Math.min(97, ((event.clientY - bounds.top) / bounds.height) * 100))
+
+    setStickers((current) =>
+      current.map((sticker) => (sticker.id === id ? { ...sticker, x, y } : sticker)),
+    )
+  }
+
+  const reset = () => {
+    stopCamera()
+    setPhotos([])
+    setStep('landing')
+  }
+
+  const renderHeader = () => (
+    <header className="topbar">
+      <button className="brand" onClick={reset}>
+        <span className="brand-mark">◒</span>
+        <span>Vanessa's photobox</span>
+      </button>
+      <span className="status">
+        <i /> your private photo studio
+      </span>
+    </header>
+  )
+
+  const renderLanding = () => (
+    <section className="flow-screen landing-screen">
+      <p className="eyebrow">WELCOME TO</p>
+      <h1>
+        Vanessa's
+        <br />
+        <em>photobox.</em>
+      </h1>
+      <p className="intro-copy">
+        A little studio for your biggest smiles.
+        <br />
+        Take a moment, make it yours.
+      </p>
+      <button className="primary-button start-button" onClick={beginPhotobox}>
+        Start photobox <span>→</span>
+      </button>
+      <div className="landing-doodle">✦ &nbsp; ♡ &nbsp; ✦</div>
+    </section>
+  )
+
+  const renderPermission = () => (
+    <section className="flow-screen permission-screen">
+      <span className="step-label">STEP 1 / 3</span>
+      <div className="flow-icon">{cameraIcon}</div>
+      <h2>Let's get your camera ready</h2>
+      <p>
+        Vanessa's photobox needs camera access
+        <br />
+        to capture your best angles.
+      </p>
+      <button className="primary-button" onClick={() => void allowCamera()}>
+        Allow camera access <span>→</span>
+      </button>
+      {error && <p className="error-message" role="alert">{error}</p>}
+      <button className="text-button" onClick={() => setStep('template')}>
+        Continue without camera
+      </button>
+    </section>
+  )
+
+  const renderTemplateCard = (count: number) => (
+    <button
+      className="template-card"
+      key={count}
+      onClick={() => chooseTemplate(count)}
+    >
+      <div className="mini-strip">
+        {Array.from({ length: count }).map((_, index) => (
+          <i key={index} />
+        ))}
+      </div>
+      <strong>{count} photos</strong>
+      <span>
+        {count === 4
+          ? 'The classic'
+          : count === 3
+            ? 'Short & sweet'
+            : 'Just the two of us'}
+      </span>
+    </button>
+  )
+
+  const renderCapture = () => (
+    <div className="capture-layout">
+      <div className="capture-main">
+      <p className="eyebrow capture-eyebrow">
+        PHOTO {currentShot + 1} OF {templateCount}
+      </p>
+      <h2>
+        {step === 'countdown'
+          ? 'Get ready...'
+          : step === 'confirm'
+            ? 'Keep this photo?'
+            : 'Camera is ready'}
+      </h2>
+      <div className="capture-stage">
+        {step === 'confirm' && pendingPhoto ? (
+          <img className="pending-photo" src={pendingPhoto.src} alt="Newly captured photo" />
+        ) : (
+          <video
+            ref={videoRef}
+            className={cameraOn ? 'camera-preview visible' : 'camera-preview'}
+            autoPlay
+            playsInline
+            muted
+          />
+        )}
+        {step === 'countdown' && (
+          <div className="count-number">{countdown || '✦'}</div>
+        )}
+        {step !== 'confirm' && !cameraOn && (
+          <div className="empty-stage">
+            <span className="big-camera">{cameraIcon}</span>
+            <strong>Camera is off</strong>
+          </div>
+        )}
+        {flashActive && <div className="camera-flash" aria-hidden="true" />}
+      </div>
+      {step === 'confirm' ? (
+        <div className="capture-actions confirmation-actions">
+          <button className="secondary-button" onClick={rejectPendingPhoto}>
+            Retake photo
+          </button>
+          <button className="primary-button" onClick={acceptPendingPhoto}>
+            Use this photo <span>→</span>
+          </button>
+        </div>
+      ) : (
+        <div className="capture-actions">
+        <button className="secondary-button" onClick={() => void startCamera()}>
+          {cameraOn ? 'Use camera again' : 'Turn on camera'}
+        </button>
+        <button
+          className="secondary-button"
+          onClick={() => uploadRef.current?.click()}
+        >
+          Upload instead
+        </button>
+        </div>
+      )}
+      {step === 'capture' && (
+        <button className="primary-button start-session-button" onClick={beginCapture}>
+          Start session <span>→</span>
+        </button>
+      )}
+      <input
+        ref={uploadRef}
+        type="file"
+        accept="image/*"
+        onChange={handleUpload}
+        hidden
+      />
+      {cameraDevices.length > 0 && (
+        <select
+          className="session-camera-picker"
+          value={selectedDeviceId}
+          onChange={(event) => {
+            setSelectedDeviceId(event.target.value)
+            void startCamera(event.target.value)
+          }}
+          aria-label="Choose camera"
+        >
+          {cameraDevices.map((device, index) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label || `Camera ${index + 1}`}
+            </option>
+          ))}
+        </select>
+      )}
+      </div>
+      {photos.length > 0 && (
+        <aside className="taken-photos" aria-label="Photos already taken">
+          <div className="taken-photos-heading">
+            <span>Photos taken</span>
+            <span>{photos.length} / {templateCount}</span>
+          </div>
+          <div className="taken-photos-list">
+            {photos.map((photo, index) => (
+              <button
+                className="taken-photo"
+                key={photo.id}
+                onClick={() => startRetake(index)}
+                aria-label={`Retake photo ${index + 1}`}
+              >
+                <img src={photo.src} alt={photo.label} />
+                <span>Retake</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+      )}
+    </div>
+  )
+
+  const renderSession = () => (
+    <section className="flow-screen session-screen">
+      <span className="step-label">STEP 2 / 3</span>
+      {step === 'template' && (
+        <>
+          <h2>Choose your template</h2>
+          <p>How many moments belong in your strip?</p>
+          <div className="template-grid">
+            {[4, 3, 2].map(renderTemplateCard)}
+          </div>
+        </>
+      )}
+      {(step === 'countdown' || step === 'capture' || step === 'confirm') &&
+        renderCapture()}
+    </section>
+  )
+
+  const renderCustomizer = () => (
+    <div className="customizer">
+      <div className="customizer-group">
+        <span>Frame color</span>
+        <div className="color-options">
+          {frameColors.map((color) => (
+            <button
+              key={color.value}
+              className={
+                frameColor === color.value
+                  ? 'color-swatch selected'
+                  : 'color-swatch'
+              }
+              style={{ backgroundColor: color.value }}
+              onClick={() => setFrameColor(color.value)}
+              aria-label={`${color.name} frame`}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="customizer-group">
+        <span>Stickers</span>
+        <div className="sticker-options">
+          {stickerOptions.map((sticker) => (
+            <button
+              key={sticker}
+              className={
+                stickers.some((item) => item.symbol === sticker)
+                  ? 'sticker-button selected'
+                  : 'sticker-button'
+              }
+              onClick={() => toggleSticker(sticker)}
+              aria-label={`Add ${sticker} sticker`}
+            >
+              {sticker}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderReview = () => (
+    <section className="flow-screen review-screen">
+      <span className="step-label">STEP 3 / 3</span>
+      <h2>Your strip is looking good!</h2>
+      <p>Retake a frame or make your final customizations.</p>
+      <div className="review-layout">
+        <div
+          className="strip-preview"
+          style={{ backgroundColor: frameColor }}
+        >
+          {photos.map((photo, index) => (
+            <button
+              className="strip-photo"
+              key={photo.id}
+              onClick={() => startRetake(index)}
+            >
+              <img src={photo.src} alt={photo.label} />
+              <span>Retake</span>
+            </button>
+          ))}
+          <div className="sticker-layer" aria-label="Draggable stickers">
+            {stickers.map((sticker) => (
+              <button
+                className="strip-sticker"
+                key={sticker.id}
+                style={{ left: `${sticker.x}%`, top: `${sticker.y}%` }}
+                onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+                onPointerMove={(event) => moveSticker(event, sticker.id)}
+                aria-label={`Move ${sticker.symbol} sticker`}
+              >
+                {sticker.symbol}
+              </button>
+            ))}
+          </div>
+          <div className="strip-signature">
+            <b>VANESSA'S PHOTOBOX</b>
+          </div>
+        </div>
+        {renderCustomizer()}
+      </div>
+      <div className="review-actions">
+        <button className="primary-button" onClick={() => void downloadStrip()}>
+          Download PNG <span>↓</span>
+        </button>
+        <button className="text-button" onClick={reset}>
+          Start over
+        </button>
+      </div>
+    </section>
+  )
+
+  return (
+    <main className="app-shell">
+      {renderHeader()}
+      {step === 'landing' && renderLanding()}
+      {step === 'permission' && renderPermission()}
+      {(step === 'template' ||
+        step === 'countdown' ||
+        step === 'capture' ||
+        step === 'confirm') &&
+        renderSession()}
+      {step === 'review' && renderReview()}
+      <footer>
+        <span>✦</span> Vanessa's photobox · made for the moments worth keeping{' '}
+        <span>✦</span>
+      </footer>
+    </main>
+  )
+}
+
+export default App
