@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
+import countdownSound from './soundeffect/5 second countdown with sound effect - RG SACHIN.mp3'
+import shutterSound from './soundeffect/camera click soundeffect.wav'
+import { stripTemplates } from './config/stripTemplates'
 
 type Step =
   | 'landing'
@@ -55,12 +58,17 @@ function App() {
   const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
   const [frameColor, setFrameColor] = useState(frameColors[0].value)
+  const [selectedTemplateId, setSelectedTemplateId] = useState(
+    stripTemplates[0]?.id ?? '',
+  )
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [error, setError] = useState('')
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
+  const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
+  const shutterAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const findCameraDevices = async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -94,6 +102,28 @@ function App() {
       videoRef.current.srcObject = streamRef.current
     }
   }, [cameraOn, step])
+
+  useEffect(() => {
+    countdownAudioRef.current = new Audio(countdownSound)
+    shutterAudioRef.current = new Audio(shutterSound)
+    countdownAudioRef.current.preload = 'auto'
+    shutterAudioRef.current.preload = 'auto'
+
+    return () => {
+      countdownAudioRef.current?.pause()
+      shutterAudioRef.current?.pause()
+    }
+  }, [])
+
+  const playSound = (audioRef: React.RefObject<HTMLAudioElement | null>) => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    audio.currentTime = 0
+    void audio.play().catch(() => {
+      // Browsers can reject audio if the user has not interacted with the page yet.
+    })
+  }
 
   const startCamera = async (deviceId = selectedDeviceId) => {
     setError('')
@@ -179,6 +209,10 @@ function App() {
   useEffect(() => {
     if (step !== 'countdown') return
 
+    if (countdown === 5) {
+      playSound(countdownAudioRef)
+    }
+
     if (countdown > 0) {
       const timer = window.setTimeout(
         () => setCountdown((value) => value - 1),
@@ -205,6 +239,7 @@ function App() {
 
       setFlashActive(true)
       window.setTimeout(() => setFlashActive(false), 220)
+      playSound(shutterAudioRef)
       setPendingPhoto(photo)
       setStep('confirm')
     }, 0)
@@ -297,6 +332,23 @@ function App() {
 
     context.fillStyle = frameColor
     context.fillRect(0, 0, canvas.width, canvas.height)
+
+    const selectedTemplate = stripTemplates.find(
+      (template) => template.id === selectedTemplateId,
+    )
+
+    if (selectedTemplate) {
+      const backgroundImage = new Image()
+      backgroundImage.src = selectedTemplate.image
+
+      await new Promise<void>((resolve) => {
+        backgroundImage.onload = () => resolve()
+        backgroundImage.onerror = () => resolve()
+      })
+
+      context.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height)
+    }
+
     context.fillStyle = '#29344f'
     context.textAlign = 'center'
     context.font = '500 22px Arial'
@@ -630,6 +682,26 @@ function App() {
           ))}
         </div>
       </div>
+      <div className="customizer-group">
+        <span>Strip background</span>
+        <div className="template-options">
+          {stripTemplates.map((template) => (
+            <button
+              key={template.id}
+              className={
+                selectedTemplateId === template.id
+                  ? 'template-swatch selected'
+                  : 'template-swatch'
+              }
+              style={{ backgroundImage: `url("${template.image}")` }}
+              onClick={() => setSelectedTemplateId(template.id)}
+              aria-label={template.name}
+            >
+              <span>{template.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 
@@ -641,7 +713,10 @@ function App() {
       <div className="review-layout">
         <div
           className="strip-preview"
-          style={{ backgroundColor: frameColor }}
+          style={{
+            backgroundColor: frameColor,
+            backgroundImage: `url("${stripTemplates.find((template) => template.id === selectedTemplateId)?.image}")`,
+          }}
         >
           {photos.map((photo, index) => (
             <button

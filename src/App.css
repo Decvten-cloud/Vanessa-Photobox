@@ -680,7 +680,8 @@ h1 em {
 }
 
 .color-options,
-.sticker-options {
+.sticker-options,
+.template-options {
   display: flex;
   gap: 7px;
 }
@@ -712,6 +713,40 @@ h1 em {
 .sticker-button.selected {
   border-color: var(--pink);
   background: var(--soft-white);
+}
+
+.template-options {
+  flex-wrap: wrap;
+}
+
+.template-swatch {
+  display: grid;
+  place-items: end center;
+  width: 62px;
+  height: 42px;
+  padding: 0 3px 3px;
+  border: 2px solid transparent;
+  background-position: center;
+  background-size: cover;
+  color: var(--ink);
+  font: 8px 'DM Mono', monospace;
+  text-transform: uppercase;
+}
+
+.template-swatch span {
+  padding: 2px 3px;
+  background: rgba(255, 250, 253, 0.84);
+}
+
+.template-swatch.selected {
+  border-color: var(--pink-dark);
+  outline: 2px solid var(--pink-dark);
+  outline-offset: 1px;
+}
+
+.strip-preview {
+  background-position: center;
+  background-size: cover;
 }
 
 .review-actions {
