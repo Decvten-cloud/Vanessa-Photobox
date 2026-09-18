@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import countdownSound from './soundeffect/5 second countdown with sound effect - RG SACHIN.mp3'
 import shutterSound from './soundeffect/camera click soundeffect.wav'
-import { stripTemplates } from './config/stripTemplates'
+import {
+  stripBackgroundOptions,
+  templateOptions,
+} from './config/stripTemplates'
 
 type Step =
   | 'landing'
@@ -27,6 +30,17 @@ type Sticker = {
 }
 
 const frameColors = [
+  { name: 'White', value: '#ffffff' },
+  { name: 'Black', value: '#171923' },
+  { name: 'Charcoal', value: '#454854' },
+  { name: 'Navy', value: '#1f315d' },
+  { name: 'Blue', value: '#4f86c6' },
+  { name: 'Mint', value: '#a8d8c8' },
+  { name: 'Green', value: '#6fa878' },
+  { name: 'Yellow', value: '#f4d35e' },
+  { name: 'Orange', value: '#ed9b5a' },
+  { name: 'Red', value: '#d95d63' },
+  { name: 'Purple', value: '#8c73b5' },
   { name: 'Blush', value: '#f4b6cc' },
   { name: 'Rose', value: '#df7fa8' },
   { name: 'Lavender', value: '#d4c5ed' },
@@ -59,7 +73,10 @@ function App() {
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
   const [frameColor, setFrameColor] = useState(frameColors[0].value)
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    stripTemplates[0]?.id ?? '',
+    templateOptions[0]?.id ?? '',
+  )
+  const [selectedStripBackgroundId, setSelectedStripBackgroundId] = useState(
+    stripBackgroundOptions[0]?.id ?? '',
   )
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [error, setError] = useState('')
@@ -67,6 +84,8 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
+  const templateSliderRef = useRef<HTMLDivElement>(null)
+  const stripBackgroundSliderRef = useRef<HTMLDivElement>(null)
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
   const shutterAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -138,8 +157,16 @@ function App() {
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : { facingMode: 'user' },
+          ? {
+              deviceId: { exact: deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            }
+          : {
+              facingMode: 'user',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
         audio: false,
       })
 
@@ -191,6 +218,16 @@ function App() {
     setStep('countdown')
   }
 
+  const replacePhotoAtIndex = (index: number, replacement: Photo) => {
+    setPhotos((current) => {
+      if (index < 0 || index >= current.length) return current
+
+      const updated = [...current]
+      updated[index] = replacement
+      return updated
+    })
+  }
+
   const captureFromCamera = () => {
     const video = videoRef.current
 
@@ -201,7 +238,13 @@ function App() {
     const canvas = document.createElement('canvas')
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
-    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const context = canvas.getContext('2d')
+
+    if (!context) return null
+
+    context.translate(canvas.width, 0)
+    context.scale(-1, 1)
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
 
     return canvas.toDataURL('image/jpeg', 0.92)
   }
@@ -251,11 +294,7 @@ function App() {
     if (!pendingPhoto) return
 
     if (retakeIndex !== null) {
-      setPhotos((current) =>
-        current.map((item, index) =>
-          index === retakeIndex ? pendingPhoto : item,
-        ),
-      )
+      replacePhotoAtIndex(retakeIndex, pendingPhoto)
       setRetakeIndex(null)
       setPendingPhoto(null)
       setStep('review')
@@ -281,6 +320,8 @@ function App() {
   }
 
   const startRetake = (index: number) => {
+    if (pendingPhoto) return
+
     setRetakeIndex(index)
     setPendingPhoto(null)
     setCurrentShot(index)
@@ -298,12 +339,20 @@ function App() {
       const photo: Photo = {
         id: Date.now(),
         src: String(reader.result),
-        label: 'Uploaded photo',
+        label:
+          retakeIndex !== null
+            ? `Photo ${retakeIndex + 1}`
+            : 'Uploaded photo',
       }
 
-      setPhotos((current) =>
-        current.length < templateCount ? [...current, photo] : current,
-      )
+      if (retakeIndex !== null) {
+        replacePhotoAtIndex(retakeIndex, photo)
+        setRetakeIndex(null)
+      } else {
+        setPhotos((current) =>
+          current.length < templateCount ? [...current, photo] : current,
+        )
+      }
       setStep('review')
     }
 
@@ -311,21 +360,34 @@ function App() {
     event.target.value = ''
   }
 
+  const loadImage = (src: string) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error(`Unable to load image: ${src}`))
+      image.src = src
+    })
+
   const downloadStrip = async () => {
     if (!photos.length) return
 
     const canvas = document.createElement('canvas')
-    const width = 720
-    const padding = 28
-    const photoHeight = 430
-    const gap = 18
+    const width = 420
+    const targetHeight = width * 3
+    const padding = 20
+    const gap = 12
+    const titleAreaHeight = 60
+    const photoWidth = width - padding * 2
+    const availablePhotoHeight =
+      targetHeight - padding * 2 - titleAreaHeight - gap * (photos.length - 1)
+    const firstPhoto = await loadImage(photos[0].src).catch(() => null)
+    const photoAspectRatio = firstPhoto?.width && firstPhoto.height
+      ? firstPhoto.width / firstPhoto.height
+      : 1
+    const photoHeight = Math.min(photoWidth / photoAspectRatio, availablePhotoHeight / photos.length)
 
     canvas.width = width
-    canvas.height =
-      padding * 2 +
-      photos.length * photoHeight +
-      (photos.length - 1) * gap +
-      100
+    canvas.height = targetHeight
 
     const context = canvas.getContext('2d')
     if (!context) return
@@ -333,48 +395,69 @@ function App() {
     context.fillStyle = frameColor
     context.fillRect(0, 0, canvas.width, canvas.height)
 
-    const selectedTemplate = stripTemplates.find(
+    const selectedTemplate = templateOptions.find(
       (template) => template.id === selectedTemplateId,
     )
 
     if (selectedTemplate) {
-      const backgroundImage = new Image()
-      backgroundImage.src = selectedTemplate.image
+      const backgroundImage = await loadImage(selectedTemplate.image).catch(() => null)
 
-      await new Promise<void>((resolve) => {
-        backgroundImage.onload = () => resolve()
-        backgroundImage.onerror = () => resolve()
-      })
+      if (backgroundImage) {
+        const scale = Math.max(
+          canvas.width / backgroundImage.width,
+          canvas.height / backgroundImage.height,
+        )
+        const imageWidth = backgroundImage.width * scale
+        const imageHeight = backgroundImage.height * scale
 
-      context.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height)
+        context.save()
+        context.globalAlpha = 0.9
+        context.drawImage(
+          backgroundImage,
+          (canvas.width - imageWidth) / 2,
+          (canvas.height - imageHeight) / 2,
+          imageWidth,
+          imageHeight,
+        )
+        context.restore()
+      }
     }
 
-    context.fillStyle = '#29344f'
-    context.textAlign = 'center'
-    context.font = '500 22px Arial'
-    context.fillText("VANESSA'S PHOTOBOX", width / 2, canvas.height - 48)
-    context.font = '32px Arial'
+    const selectedStripBackground = stripBackgroundOptions.find(
+      (template) => template.id === selectedStripBackgroundId,
+    )
 
-    stickers.forEach((sticker) => {
-      context.fillText(
-        sticker.symbol,
-        (sticker.x / 100) * width,
-        (sticker.y / 100) * canvas.height,
-      )
-    })
+    if (selectedStripBackground) {
+      const backgroundImage = await loadImage(selectedStripBackground.image).catch(() => null)
+
+      if (backgroundImage) {
+        const scale = Math.max(
+          canvas.width / backgroundImage.width,
+          canvas.height / backgroundImage.height,
+        )
+        const imageWidth = backgroundImage.width * scale
+        const imageHeight = backgroundImage.height * scale
+
+        context.save()
+        context.globalAlpha = 0.8
+        context.drawImage(
+          backgroundImage,
+          (canvas.width - imageWidth) / 2,
+          (canvas.height - imageHeight) / 2,
+          imageWidth,
+          imageHeight,
+        )
+        context.restore()
+      }
+    }
 
     for (const [index, photo] of photos.entries()) {
-      const image = new Image()
-      image.src = photo.src
-
-      await new Promise<void>((resolve) => {
-        image.onload = () => resolve()
-        image.onerror = () => resolve()
-      })
+      const image = await loadImage(photo.src).catch(() => null)
+      if (!image) continue
 
       const y = padding + index * (photoHeight + gap)
       const scale = Math.max(
-        (width - padding * 2) / image.width,
+        photoWidth / image.width,
         photoHeight / image.height,
       )
       const imageWidth = image.width * scale
@@ -393,6 +476,21 @@ function App() {
       )
       context.restore()
     }
+
+    context.fillStyle = '#29344f'
+    context.textAlign = 'center'
+    const titleFontSize = Math.max(16, width * 0.07)
+    context.font = `600 italic ${titleFontSize}px "Playfair Display", Georgia, serif`
+    context.fillText("VANESSA'S PHOTOBOX", width / 2, canvas.height - 42)
+    context.font = '32px Arial'
+
+    stickers.forEach((sticker) => {
+      context.fillText(
+        sticker.symbol,
+        (sticker.x / 100) * width,
+        (sticker.y / 100) * canvas.height,
+      )
+    })
 
     const link = document.createElement('a')
     link.href = canvas.toDataURL('image/png')
@@ -433,6 +531,27 @@ function App() {
       current.map((sticker) => (sticker.id === id ? { ...sticker, x, y } : sticker)),
     )
   }
+
+  const scrollTemplates = (direction: number, sliderRef: React.RefObject<HTMLDivElement | null>) => {
+    const slider = sliderRef.current
+    if (!slider) return
+
+    slider.scrollBy({
+      left: direction * slider.clientWidth,
+      behavior: 'smooth',
+    })
+  }
+
+  const templatePages = Array.from(
+    { length: Math.ceil(templateOptions.length / 9) },
+    (_, pageIndex) => templateOptions.slice(pageIndex * 9, pageIndex * 9 + 9),
+  )
+
+  const stripBackgroundPages = Array.from(
+    { length: Math.ceil(stripBackgroundOptions.length / 9) },
+    (_, pageIndex) =>
+      stripBackgroundOptions.slice(pageIndex * 9, pageIndex * 9 + 9),
+  )
 
   const reset = () => {
     stopCamera()
@@ -643,6 +762,19 @@ function App() {
     </section>
   )
 
+  const handleDesignToggle = (
+    currentId: string,
+    selectedId: string,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+  ) => {
+    if (currentId === selectedId) {
+      setter('')
+      return
+    }
+
+    setter(currentId)
+  }
+
   const renderCustomizer = () => (
     <div className="customizer">
       <div className="customizer-group">
@@ -684,22 +816,86 @@ function App() {
       </div>
       <div className="customizer-group">
         <span>Strip background</span>
-        <div className="template-options">
-          {stripTemplates.map((template) => (
-            <button
-              key={template.id}
-              className={
-                selectedTemplateId === template.id
-                  ? 'template-swatch selected'
-                  : 'template-swatch'
-              }
-              style={{ backgroundImage: `url("${template.image}")` }}
-              onClick={() => setSelectedTemplateId(template.id)}
-              aria-label={template.name}
-            >
-              <span>{template.name}</span>
-            </button>
-          ))}
+        <div className="template-slider">
+          <button
+            className="template-slider-arrow"
+            type="button"
+            onClick={() => scrollTemplates(-1, stripBackgroundSliderRef)}
+            aria-label="Previous strip background"
+          >
+            ‹
+          </button>
+          <div className="template-options" ref={stripBackgroundSliderRef}>
+            {stripBackgroundPages.map((page, pageIndex) => (
+              <div className="template-page" key={`background-page-${pageIndex}`}>
+                {page.map((template) => (
+                  <button
+                    key={template.id}
+                    className={
+                      selectedStripBackgroundId === template.id
+                        ? 'template-swatch selected'
+                        : 'template-swatch'
+                    }
+                    style={{ backgroundImage: `url("${template.image}")` }}
+                    onClick={() => handleDesignToggle(template.id, selectedStripBackgroundId, setSelectedStripBackgroundId)}
+                    aria-label={template.name}
+                  >
+                    <span>{template.name}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+          <button
+            className="template-slider-arrow"
+            type="button"
+            onClick={() => scrollTemplates(1, stripBackgroundSliderRef)}
+            aria-label="Next strip background"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <div className="customizer-group">
+        <span>Template</span>
+        <div className="template-slider">
+          <button
+            className="template-slider-arrow"
+            type="button"
+            onClick={() => scrollTemplates(-1, templateSliderRef)}
+            aria-label="Previous template"
+          >
+            ‹
+          </button>
+          <div className="template-options" ref={templateSliderRef}>
+            {templatePages.map((page, pageIndex) => (
+              <div className="template-page" key={`template-page-${pageIndex}`}>
+                {page.map((template) => (
+                  <button
+                    key={template.id}
+                    className={
+                      selectedTemplateId === template.id
+                        ? 'template-swatch selected'
+                        : 'template-swatch'
+                    }
+                    style={{ backgroundImage: `url("${template.image}")` }}
+                    onClick={() => handleDesignToggle(template.id, selectedTemplateId, setSelectedTemplateId)}
+                    aria-label={template.name}
+                  >
+                    <span>{template.name}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+          <button
+            className="template-slider-arrow"
+            type="button"
+            onClick={() => scrollTemplates(1, templateSliderRef)}
+            aria-label="Next template"
+          >
+            ›
+          </button>
         </div>
       </div>
     </div>
@@ -715,9 +911,24 @@ function App() {
           className="strip-preview"
           style={{
             backgroundColor: frameColor,
-            backgroundImage: `url("${stripTemplates.find((template) => template.id === selectedTemplateId)?.image}")`,
           }}
         >
+          {selectedTemplateId && (
+            <div
+              className="strip-template"
+              style={{
+                backgroundImage: `url("${templateOptions.find((template) => template.id === selectedTemplateId)?.image}")`,
+              }}
+            />
+          )}
+          {selectedStripBackgroundId && (
+            <div
+              className="strip-overlay"
+              style={{
+                backgroundImage: `url("${stripBackgroundOptions.find((template) => template.id === selectedStripBackgroundId)?.image}")`,
+              }}
+            />
+          )}
           {photos.map((photo, index) => (
             <button
               className="strip-photo"

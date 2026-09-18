@@ -5,7 +5,13 @@ type TemplateAsset = {
 }
 
 const templateFiles = import.meta.glob<string>(
-  '../assets/template/*.svg',
+  [
+    '../assets/template/*.svg',
+    '../assets/template/*.png',
+    '../assets/template/*.jpg',
+    '../assets/template/*.jpeg',
+    '../assets/template/*.webp',
+  ],
   {
     eager: true,
     import: 'default',
@@ -13,23 +19,54 @@ const templateFiles = import.meta.glob<string>(
   },
 )
 
-export const stripTemplates: TemplateAsset[] = Object.entries(templateFiles)
-  .map(([filePath, image]) => {
-    const fileName = filePath.split('/').pop()?.replace('.svg', '') ?? filePath
+const stripBackgroundFiles = import.meta.glob<string>(
+  [
+    '../assets/strip background/*.svg',
+    '../assets/strip background/*.png',
+    '../assets/strip background/*.jpg',
+    '../assets/strip background/*.jpeg',
+    '../assets/strip background/*.webp',
+  ],
+  {
+    eager: true,
+    import: 'default',
+    query: '?url',
+  },
+)
 
-    return {
-      id: fileName,
-      name: `Template ${fileName}`,
-      image,
-    }
-  })
-  .sort((first, second) => {
-    const firstNumber = Number(first.id)
-    const secondNumber = Number(second.id)
+const mapDesignFiles = (files: Record<string, string>): TemplateAsset[] =>
+  Object.entries(files)
+    .map(([filePath, image]) => {
+      const fileName =
+        filePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? filePath
+      const name = fileName
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, (letter) => letter.toUpperCase())
 
-    if (!Number.isNaN(firstNumber) && !Number.isNaN(secondNumber)) {
-      return firstNumber - secondNumber
-    }
+      return {
+        id: fileName,
+        name,
+        image,
+      }
+    })
+    .sort((first, second) => {
+      const firstNumber = Number(first.id)
+      const secondNumber = Number(second.id)
 
-    return first.name.localeCompare(second.name)
-  })
+      if (!Number.isNaN(firstNumber) && !Number.isNaN(secondNumber)) {
+        return firstNumber - secondNumber
+      }
+
+      return first.name.localeCompare(second.name)
+    })
+
+export const stripTemplates: TemplateAsset[] = mapDesignFiles({
+  ...templateFiles,
+  ...stripBackgroundFiles,
+})
+
+export const stripBackgroundOptions = mapDesignFiles(stripBackgroundFiles)
+export const templateOptions = mapDesignFiles(templateFiles)
+
+export const overlayOptions = stripBackgroundOptions
+export const fullTemplateOptions = templateOptions
