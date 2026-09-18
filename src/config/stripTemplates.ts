@@ -19,21 +19,6 @@ const templateFiles = import.meta.glob<string>(
   },
 )
 
-const stripBackgroundFiles = import.meta.glob<string>(
-  [
-    '../assets/strip background/*.svg',
-    '../assets/strip background/*.png',
-    '../assets/strip background/*.jpg',
-    '../assets/strip background/*.jpeg',
-    '../assets/strip background/*.webp',
-  ],
-  {
-    eager: true,
-    import: 'default',
-    query: '?url',
-  },
-)
-
 const mapDesignFiles = (files: Record<string, string>): TemplateAsset[] =>
   Object.entries(files)
     .map(([filePath, image]) => {
@@ -60,13 +45,4 @@ const mapDesignFiles = (files: Record<string, string>): TemplateAsset[] =>
       return first.name.localeCompare(second.name)
     })
 
-export const stripTemplates: TemplateAsset[] = mapDesignFiles({
-  ...templateFiles,
-  ...stripBackgroundFiles,
-})
-
-export const stripBackgroundOptions = mapDesignFiles(stripBackgroundFiles)
 export const templateOptions = mapDesignFiles(templateFiles)
-
-export const overlayOptions = stripBackgroundOptions
-export const fullTemplateOptions = templateOptions

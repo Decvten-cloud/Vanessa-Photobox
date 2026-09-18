@@ -2,10 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import countdownSound from './soundeffect/5 second countdown with sound effect - RG SACHIN.mp3'
 import shutterSound from './soundeffect/camera click soundeffect.wav'
-import {
-  stripBackgroundOptions,
-  templateOptions,
-} from './config/stripTemplates'
+import { templateOptions } from './config/stripTemplates'
 
 type Step =
   | 'landing'
@@ -75,9 +72,6 @@ function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     templateOptions[0]?.id ?? '',
   )
-  const [selectedStripBackgroundId, setSelectedStripBackgroundId] = useState(
-    stripBackgroundOptions[0]?.id ?? '',
-  )
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [error, setError] = useState('')
 
@@ -85,7 +79,6 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
   const templateSliderRef = useRef<HTMLDivElement>(null)
-  const stripBackgroundSliderRef = useRef<HTMLDivElement>(null)
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
   const shutterAudioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -383,9 +376,8 @@ function App() {
     const loadedPhotos = await Promise.all(
       photos.map((photo) => loadImage(photo.src).catch(() => null)),
     )
-    const photoHeights = loadedPhotos.map((image) =>
-      image ? photoWidth / (image.width / image.height) : photoWidth,
-    )
+    const photoSlotRatio = 1
+    const photoHeights = loadedPhotos.map(() => photoWidth * photoSlotRatio)
     const totalPhotoHeight = photoHeights.reduce((sum, height) => sum + height, 0)
 
     canvas.width = width
@@ -443,22 +435,6 @@ function App() {
           backgroundImage,
           0.9,
           photos.length <= 3 ? 0.82 : 1,
-        )
-      }
-    }
-
-    const selectedStripBackground = stripBackgroundOptions.find(
-      (template) => template.id === selectedStripBackgroundId,
-    )
-
-    if (selectedStripBackground) {
-      const backgroundImage = await loadImage(selectedStripBackground.image).catch(() => null)
-
-      if (backgroundImage) {
-        drawCenteredBackground(
-          backgroundImage,
-          0.8,
-          photos.length <= 3 ? 0.78 : 1,
         )
       }
     }
@@ -583,12 +559,6 @@ function App() {
     (_, pageIndex) => templateOptions.slice(pageIndex * 9, pageIndex * 9 + 9),
   )
 
-  const stripBackgroundPages = Array.from(
-    { length: Math.ceil(stripBackgroundOptions.length / 9) },
-    (_, pageIndex) =>
-      stripBackgroundOptions.slice(pageIndex * 9, pageIndex * 9 + 9),
-  )
-
   const reset = () => {
     stopCamera()
     setPhotos([])
@@ -602,7 +572,7 @@ function App() {
         <span>Vanessa's photobox</span>
       </button>
       <span className="status">
-        <i /> your private photo studio
+        <i /> your very own private photo studio for yo
       </span>
     </header>
   )
@@ -851,48 +821,6 @@ function App() {
         </div>
       </div>
       <div className="customizer-group">
-        <span>Strip background</span>
-        <div className="template-slider">
-          <button
-            className="template-slider-arrow"
-            type="button"
-            onClick={() => scrollTemplates(-1, stripBackgroundSliderRef)}
-            aria-label="Previous strip background"
-          >
-            ‹
-          </button>
-          <div className="template-options" ref={stripBackgroundSliderRef}>
-            {stripBackgroundPages.map((page, pageIndex) => (
-              <div className="template-page" key={`background-page-${pageIndex}`}>
-                {page.map((template) => (
-                  <button
-                    key={template.id}
-                    className={
-                      selectedStripBackgroundId === template.id
-                        ? 'template-swatch selected'
-                        : 'template-swatch'
-                    }
-                    style={{ backgroundImage: `url("${template.image}")` }}
-                    onClick={() => handleDesignToggle(template.id, selectedStripBackgroundId, setSelectedStripBackgroundId)}
-                    aria-label={template.name}
-                  >
-                    <span>{template.name}</span>
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-          <button
-            className="template-slider-arrow"
-            type="button"
-            onClick={() => scrollTemplates(1, stripBackgroundSliderRef)}
-            aria-label="Next strip background"
-          >
-            ›
-          </button>
-        </div>
-      </div>
-      <div className="customizer-group">
         <span>Template</span>
         <div className="template-slider">
           <button
@@ -954,14 +882,6 @@ function App() {
               className="strip-template"
               style={{
                 backgroundImage: `url("${templateOptions.find((template) => template.id === selectedTemplateId)?.image}")`,
-              }}
-            />
-          )}
-          {selectedStripBackgroundId && (
-            <div
-              className="strip-overlay"
-              style={{
-                backgroundImage: `url("${stripBackgroundOptions.find((template) => template.id === selectedStripBackgroundId)?.image}")`,
               }}
             />
           )}
