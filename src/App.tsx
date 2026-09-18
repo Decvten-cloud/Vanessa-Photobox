@@ -642,17 +642,6 @@ function App() {
     const currentSticker = stickers.find((sticker) => sticker.id === id)
     const strip = event.currentTarget.closest('.strip-preview')
 
-    if (strip) {
-      dragOriginRef.current[id] = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        stickerX: currentSticker?.x ?? 50,
-        stickerY: currentSticker?.y ?? 50,
-        moved: false,
-      }
-    }
-
     const gesture = stickerGestureRef.current.get(id) ?? {
       points: new Map<number, { x: number; y: number }>(),
       baseDistance: 0,
@@ -665,10 +654,26 @@ function App() {
     })
 
     if (gesture.points.size === 1) {
+      // Only the first finger sets up a potential single-finger drag.
       gesture.baseScale = currentSticker?.scale ?? 1
+
+      if (strip) {
+        dragOriginRef.current[id] = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          stickerX: currentSticker?.x ?? 50,
+          stickerY: currentSticker?.y ?? 50,
+          moved: false,
+        }
+      }
     }
 
     if (gesture.points.size === 2) {
+      // A second finger just landed: this is now a pinch, not a drag, so
+      // cancel any in-progress single-finger drag for this sticker.
+      delete dragOriginRef.current[id]
+
       const [firstPointer, secondPointer] = Array.from(gesture.points.values())
       gesture.baseDistance = Math.hypot(
         secondPointer.x - firstPointer.x,
@@ -736,8 +741,27 @@ function App() {
       lastTapRef.current[id] = now
     }
 
-    delete dragOriginRef.current[id]
-    stickerGestureRef.current.delete(id)
+    if (origin && origin.pointerId === event.pointerId) {
+      delete dragOriginRef.current[id]
+    }
+
+    // Only drop this pointer from the gesture, not the whole gesture --
+    // otherwise lifting one finger mid-pinch would wipe out the state the
+    // still-touching finger needs to keep scaling.
+    const gesture = stickerGestureRef.current.get(id)
+    if (gesture) {
+      gesture.points.delete(event.pointerId)
+
+      if (gesture.points.size === 0) {
+        stickerGestureRef.current.delete(id)
+      } else {
+        // Dropped from two fingers back to one: end the pinch cleanly so a
+        // stray move doesn't jump the scale. A fresh pointerdown on the
+        // remaining finger will start a new drag if the user continues.
+        gesture.baseDistance = 0
+      }
+    }
+
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -771,7 +795,7 @@ function App() {
         <span>Vanessa's photobox</span>
       </button>
       <span className="status">
-        <i /> your very own private photo studio for you
+        <i /> your very own private photo studio for yo
       </span>
     </header>
   )
