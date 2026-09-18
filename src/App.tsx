@@ -3,6 +3,7 @@ import './App.css'
 import countdownSound from './soundeffect/5 second countdown with sound effect - RG SACHIN.mp3'
 import shutterSound from './soundeffect/camera click soundeffect.wav'
 import { templateOptions } from './config/stripTemplates'
+import { stickerOptions, type StickerOption } from './config/stickerAssets'
 
 type Step =
   | 'landing'
@@ -21,7 +22,10 @@ type Photo = {
 
 type Sticker = {
   id: string
+  optionId: string
+  type: 'emoji' | 'image'
   symbol: string
+  src?: string
   x: number
   y: number
   scale?: number
@@ -46,8 +50,6 @@ const frameColors = [
   { name: 'Sky blue', value: '#8fc8e5' },
   { name: 'Night blue', value: '#293b5f' },
 ]
-
-const stickerOptions = ['✦', '♡', '☀', '✿', '✧', 'V']
 
 const cameraIcon = (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -543,15 +545,37 @@ function App() {
       canvas.height - titleAreaHeight / 2,
     )
     context.textBaseline = 'alphabetic'
-    context.font = '32px Arial'
 
-    stickers.forEach((sticker) => {
-      context.fillText(
-        sticker.symbol,
-        (sticker.x / 100) * width,
-        (sticker.y / 100) * canvas.height,
-      )
-    })
+    // Stickers: image stickers are drawn with drawImage (aspect-ratio
+    // preserved, no background), emoji/text stickers keep using fillText.
+    // Both respect the sticker's pinch-to-scale `scale` value.
+    const stickerBaseSize = width * 0.19 // ~68px at a 360px-wide export
+
+    for (const sticker of stickers) {
+      const stickerScale = sticker.scale ?? 1
+      const centerX = (sticker.x / 100) * width
+      const centerY = (sticker.y / 100) * canvas.height
+
+      if (sticker.type === 'image' && sticker.src) {
+        const stickerImage = await loadImage(sticker.src).catch(() => null)
+        if (!stickerImage) continue
+
+        const aspect = stickerImage.width / stickerImage.height
+        const drawHeight = stickerBaseSize * stickerScale
+        const drawWidth = drawHeight * aspect
+
+        context.drawImage(
+          stickerImage,
+          centerX - drawWidth / 2,
+          centerY - drawHeight / 2,
+          drawWidth,
+          drawHeight,
+        )
+      } else if (sticker.symbol) {
+        context.font = `${32 * stickerScale}px Arial`
+        context.fillText(sticker.symbol, centerX, centerY)
+      }
+    }
 
     const link = document.createElement('a')
     link.href = canvas.toDataURL('image/png')
@@ -559,9 +583,9 @@ function App() {
     link.click()
   }
 
-  const toggleSticker = (symbol: string) => {
+  const toggleSticker = (option: StickerOption) => {
     setStickers((current) => {
-      const existingSticker = current.find((sticker) => sticker.symbol === symbol)
+      const existingSticker = current.find((sticker) => sticker.optionId === option.id)
 
       if (existingSticker) {
         return current.filter((sticker) => sticker.id !== existingSticker.id)
@@ -571,8 +595,11 @@ function App() {
       return [
         ...current,
         {
-          id: `${symbol}-${Date.now()}`,
-          symbol,
+          id: `${option.id}-${Date.now()}`,
+          optionId: option.id,
+          type: option.type,
+          symbol: option.symbol ?? '',
+          src: option.src,
           x: 12 + offset,
           y: 94,
           scale: 1,
@@ -976,18 +1003,22 @@ function App() {
       <div className="customizer-group">
         <span>Stickers</span>
         <div className="sticker-options">
-          {stickerOptions.map((sticker) => (
+          {stickerOptions.map((option) => (
             <button
-              key={sticker}
+              key={option.id}
               className={
-                stickers.some((item) => item.symbol === sticker)
+                stickers.some((item) => item.optionId === option.id)
                   ? 'sticker-button selected'
                   : 'sticker-button'
               }
-              onClick={() => toggleSticker(sticker)}
-              aria-label={`Add ${sticker} sticker`}
+              onClick={() => toggleSticker(option)}
+              aria-label={`Add ${option.label} sticker`}
             >
-              {sticker}
+              {option.type === 'image' ? (
+                <img className="sticker-thumb" src={option.src} alt="" />
+              ) : (
+                option.symbol
+              )}
             </button>
           ))}
         </div>
@@ -1070,7 +1101,11 @@ function App() {
           <div className="sticker-layer" aria-label="Draggable stickers">
             {stickers.map((sticker) => (
               <button
-                className="strip-sticker"
+                className={
+                  sticker.type === 'image'
+                    ? 'strip-sticker image-sticker'
+                    : 'strip-sticker'
+                }
                 key={sticker.id}
                 style={{
                   left: `${sticker.x}%`,
@@ -1082,9 +1117,13 @@ function App() {
                 onPointerUp={(event) => handleStickerPointerUp(event, sticker.id)}
                 onPointerLeave={(event) => handleStickerPointerUp(event, sticker.id)}
                 onDoubleClick={() => removeSticker(sticker.id)}
-                aria-label={`Move ${sticker.symbol} sticker`}
+                aria-label="Move sticker"
               >
-                {sticker.symbol}
+                {sticker.type === 'image' ? (
+                  <img src={sticker.src} alt="" draggable={false} />
+                ) : (
+                  sticker.symbol
+                )}
               </button>
             ))}
           </div>

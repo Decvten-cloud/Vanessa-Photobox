@@ -674,6 +674,33 @@ h1 em {
   transform: translate(-50%, -50%) scale(1.08);
 }
 
+/* Image-based stickers (png/jpg/jpeg/svg): drop the circular emoji frame
+   and background fill so transparent artwork shows its real silhouette
+   instead of getting clipped into a blob. Pinch-to-scale still applies via
+   the inline transform set in App.tsx -- this only changes the shape. */
+.strip-sticker.image-sticker {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.strip-sticker.image-sticker:active {
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.strip-sticker.image-sticker img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
 .strip-signature b {
   font-family: 'Playfair Display', Georgia, serif;
   font-style: italic;
@@ -738,6 +765,11 @@ h1 em {
   outline-offset: 2px;
 }
 
+.sticker-options {
+  flex-wrap: wrap;
+  max-width: min(100%, 300px);
+}
+
 .sticker-button {
   width: 36px;
   height: 36px;
@@ -752,6 +784,16 @@ h1 em {
 .sticker-button.selected {
   border-color: var(--pink);
   background: var(--soft-white);
+}
+
+/* Thumbnail shown inside the sticker picker button for image stickers --
+   sized to fit the existing 36x36 button without a background circle. */
+.sticker-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .template-slider {
