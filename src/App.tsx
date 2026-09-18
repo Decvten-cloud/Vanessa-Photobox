@@ -873,7 +873,7 @@ function App() {
         <span>Vanessa's photobox</span>
       </button>
       <span className="status">
-        <i /> your very own private photo studio for yo
+        <i /> your very own private photo studio for you
       </span>
     </header>
   )
