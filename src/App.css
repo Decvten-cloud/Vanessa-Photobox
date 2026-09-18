@@ -563,6 +563,10 @@ h1 em {
   padding: 18px 16px 14px;
   overflow: hidden;
   box-shadow: 0 10px 25px rgba(66, 43, 29, 0.12);
+  /* A pinch's second finger often lands elsewhere on the strip (not on the
+     sticker itself); this stops the browser's own pinch-zoom/scroll from
+     kicking in and fighting the sticker's own scale gesture. */
+  touch-action: none;
 }
 
 .review-layout .strip-preview {

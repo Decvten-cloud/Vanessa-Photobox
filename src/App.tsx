@@ -107,8 +107,24 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
   const templateSliderRef = useRef<HTMLDivElement>(null)
+  const stripPreviewRef = useRef<HTMLDivElement>(null)
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
   const shutterAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Which sticker (if any) is currently being touch-dragged or pinched. A
+  // pinch's second finger almost never lands back on the sticker's own
+  // small button, so once a touch gesture starts we track it at the window
+  // level instead of only on the button -- this ref is how the window
+  // listeners below know which sticker to apply the gesture to.
+  const activeStickerIdRef = useRef<string | null>(null)
+
+  // Always-current copy of `stickers`, read inside the window listeners
+  // below so that effect can be registered once (empty deps) instead of
+  // re-attaching on every scale/position update.
+  const stickersRef = useRef<Sticker[]>([])
+  useEffect(() => {
+    stickersRef.current = stickers
+  }, [stickers])
 
   const findCameraDevices = async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -612,16 +628,14 @@ function App() {
     setStickers((current) => current.filter((sticker) => sticker.id !== id))
   }
 
-  const moveSticker = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
-    const strip = event.currentTarget.closest('.strip-preview')
-    if (!strip || event.buttons !== 1) return
-
+  const moveSticker = (clientX: number, clientY: number, id: string) => {
+    const strip = stripPreviewRef.current
     const origin = dragOriginRef.current[id]
-    if (!origin || origin.pointerId !== event.pointerId) return
+    if (!strip || !origin) return
 
     const bounds = strip.getBoundingClientRect()
-    const deltaX = ((event.clientX - origin.startX) / bounds.width) * 100
-    const deltaY = ((event.clientY - origin.startY) / bounds.height) * 100
+    const deltaX = ((clientX - origin.startX) / bounds.width) * 100
+    const deltaY = ((clientY - origin.startY) / bounds.height) * 100
 
     const nextX = Math.max(3, Math.min(97, origin.stickerX + deltaX))
     const nextY = Math.max(3, Math.min(97, origin.stickerY + deltaY))
@@ -640,132 +654,196 @@ function App() {
     id: string,
   ) => {
     const currentSticker = stickers.find((sticker) => sticker.id === id)
-    const strip = event.currentTarget.closest('.strip-preview')
+
+    if (event.pointerType !== 'touch') {
+      // Mouse / pen: a single pointer, so plain drag on the button itself
+      // works fine and doesn't need the window-level machinery below.
+      dragOriginRef.current[id] = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        stickerX: currentSticker?.x ?? 50,
+        stickerY: currentSticker?.y ?? 50,
+        moved: false,
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      return
+    }
+
+    // Touch: this finger might be the start of a drag, or the first half
+    // of a pinch whose second finger lands somewhere else on the screen
+    // entirely -- so from here on, window-level listeners (registered in
+    // the effect below) drive the gesture, not this button's own handlers.
+    event.preventDefault()
+    activeStickerIdRef.current = id
 
     const gesture = stickerGestureRef.current.get(id) ?? {
       points: new Map<number, { x: number; y: number }>(),
       baseDistance: 0,
-      baseScale: 1,
+      baseScale: currentSticker?.scale ?? 1,
     }
-
-    gesture.points.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
-    })
-
-    if (gesture.points.size === 1) {
-      // Only the first finger sets up a potential single-finger drag.
-      gesture.baseScale = currentSticker?.scale ?? 1
-
-      if (strip) {
-        dragOriginRef.current[id] = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          stickerX: currentSticker?.x ?? 50,
-          stickerY: currentSticker?.y ?? 50,
-          moved: false,
-        }
-      }
-    }
-
-    if (gesture.points.size === 2) {
-      // A second finger just landed: this is now a pinch, not a drag, so
-      // cancel any in-progress single-finger drag for this sticker.
-      delete dragOriginRef.current[id]
-
-      const [firstPointer, secondPointer] = Array.from(gesture.points.values())
-      gesture.baseDistance = Math.hypot(
-        secondPointer.x - firstPointer.x,
-        secondPointer.y - firstPointer.y,
-      )
-      gesture.baseScale = stickers.find((sticker) => sticker.id === id)?.scale ?? 1
-    }
-
+    gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    gesture.baseScale = currentSticker?.scale ?? 1
     stickerGestureRef.current.set(id, gesture)
-    event.currentTarget.setPointerCapture(event.pointerId)
+
+    dragOriginRef.current[id] = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      stickerX: currentSticker?.x ?? 50,
+      stickerY: currentSticker?.y ?? 50,
+      moved: false,
+    }
   }
 
   const handleStickerPointerMove = (
     event: React.PointerEvent<HTMLButtonElement>,
     id: string,
   ) => {
-    const gesture = stickerGestureRef.current.get(id)
-    const origin = dragOriginRef.current[id]
-
-    if (origin && origin.pointerId === event.pointerId) {
-      moveSticker(event, id)
-      return
-    }
-
-    if (!gesture) return
-
-    gesture.points.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
-    })
-
-    if (gesture.points.size >= 2 && gesture.baseDistance > 0) {
-      const [firstPointer, secondPointer] = Array.from(gesture.points.values())
-      const distance = Math.hypot(
-        secondPointer.x - firstPointer.x,
-        secondPointer.y - firstPointer.y,
-      )
-      const nextScale = Math.min(
-        2,
-        Math.max(0.5, gesture.baseScale * (distance / gesture.baseDistance)),
-      )
-
-      setStickers((current) =>
-        current.map((sticker) =>
-          sticker.id === id ? { ...sticker, scale: nextScale } : sticker,
-        ),
-      )
-      return
-    }
+    // Touch gestures are handled entirely by the window-level listeners
+    // below (see the effect) so a second finger away from the button
+    // still registers; only handle mouse/pen drag here.
+    if (event.pointerType === 'touch') return
+    moveSticker(event.clientX, event.clientY, id)
   }
 
   const handleStickerPointerUp = (
     event: React.PointerEvent<HTMLButtonElement>,
     id: string,
   ) => {
-    const now = Date.now()
-    const previousTap = lastTapRef.current[id] ?? 0
-    const origin = dragOriginRef.current[id]
-    const wasMoved = origin?.moved ?? false
+    if (event.pointerType === 'touch') return // handled globally
 
-    if (event.pointerType === 'touch' && !wasMoved && now - previousTap < 320) {
-      removeSticker(id)
-      delete lastTapRef.current[id]
-    } else if (event.pointerType === 'touch' && !wasMoved) {
-      lastTapRef.current[id] = now
-    }
-
-    if (origin && origin.pointerId === event.pointerId) {
-      delete dragOriginRef.current[id]
-    }
-
-    // Only drop this pointer from the gesture, not the whole gesture --
-    // otherwise lifting one finger mid-pinch would wipe out the state the
-    // still-touching finger needs to keep scaling.
-    const gesture = stickerGestureRef.current.get(id)
-    if (gesture) {
-      gesture.points.delete(event.pointerId)
-
-      if (gesture.points.size === 0) {
-        stickerGestureRef.current.delete(id)
-      } else {
-        // Dropped from two fingers back to one: end the pinch cleanly so a
-        // stray move doesn't jump the scale. A fresh pointerdown on the
-        // remaining finger will start a new drag if the user continues.
-        gesture.baseDistance = 0
-      }
-    }
+    delete dragOriginRef.current[id]
 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
   }
+
+  // Handles touch drag + pinch-to-scale at the window level. A pinch's two
+  // fingers are usually spread apart, so the second finger's pointerdown
+  // almost never lands back on the sticker's own small button -- listening
+  // on window instead means it doesn't matter where on screen it lands.
+  useEffect(() => {
+    const getGesture = (id: string) => stickerGestureRef.current.get(id)
+
+    const handleWindowPointerDown = (event: PointerEvent) => {
+      const id = activeStickerIdRef.current
+      if (!id || event.pointerType !== 'touch') return
+
+      const gesture = getGesture(id)
+      if (!gesture || gesture.points.has(event.pointerId) || gesture.points.size !== 1) {
+        return
+      }
+
+      event.preventDefault()
+      gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY })
+
+      // Second finger just landed: switch from drag to pinch.
+      delete dragOriginRef.current[id]
+
+      const [firstPoint, secondPoint] = Array.from(gesture.points.values())
+      gesture.baseDistance = Math.hypot(
+        secondPoint.x - firstPoint.x,
+        secondPoint.y - firstPoint.y,
+      )
+      gesture.baseScale =
+        stickersRef.current.find((sticker) => sticker.id === id)?.scale ?? 1
+    }
+
+    const handleWindowPointerMove = (event: PointerEvent) => {
+      const id = activeStickerIdRef.current
+      if (!id) return
+
+      const gesture = getGesture(id)
+      const origin = dragOriginRef.current[id]
+
+      // Still just one finger down: plain drag.
+      if (origin && origin.pointerId === event.pointerId && (!gesture || gesture.points.size < 2)) {
+        event.preventDefault()
+        moveSticker(event.clientX, event.clientY, id)
+        return
+      }
+
+      if (!gesture || !gesture.points.has(event.pointerId)) return
+
+      event.preventDefault()
+      gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY })
+
+      if (gesture.points.size === 2 && gesture.baseDistance > 0) {
+        const [firstPoint, secondPoint] = Array.from(gesture.points.values())
+        const distance = Math.hypot(
+          secondPoint.x - firstPoint.x,
+          secondPoint.y - firstPoint.y,
+        )
+        const nextScale = Math.min(
+          2,
+          Math.max(0.5, gesture.baseScale * (distance / gesture.baseDistance)),
+        )
+
+        setStickers((current) =>
+          current.map((sticker) =>
+            sticker.id === id ? { ...sticker, scale: nextScale } : sticker,
+          ),
+        )
+      }
+    }
+
+    const handleWindowPointerUp = (event: PointerEvent) => {
+      const id = activeStickerIdRef.current
+      if (!id) return
+
+      const gesture = getGesture(id)
+      const origin = dragOriginRef.current[id]
+      const wasSingleFingerTap =
+        origin?.pointerId === event.pointerId &&
+        !origin.moved &&
+        (!gesture || gesture.points.size <= 1)
+
+      if (event.pointerType === 'touch' && wasSingleFingerTap) {
+        const now = Date.now()
+        const previousTap = lastTapRef.current[id] ?? 0
+
+        if (now - previousTap < 320) {
+          removeSticker(id)
+          delete lastTapRef.current[id]
+        } else {
+          lastTapRef.current[id] = now
+        }
+      }
+
+      if (origin && origin.pointerId === event.pointerId) {
+        delete dragOriginRef.current[id]
+      }
+
+      if (gesture) {
+        gesture.points.delete(event.pointerId)
+
+        if (gesture.points.size === 0) {
+          stickerGestureRef.current.delete(id)
+          activeStickerIdRef.current = null
+        } else {
+          // Dropped from two fingers back to one: end the pinch cleanly so
+          // a stray move doesn't jump the scale.
+          gesture.baseDistance = 0
+        }
+      } else {
+        activeStickerIdRef.current = null
+      }
+    }
+
+    window.addEventListener('pointerdown', handleWindowPointerDown, { passive: false })
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false })
+    window.addEventListener('pointerup', handleWindowPointerUp)
+    window.addEventListener('pointercancel', handleWindowPointerUp)
+
+    return () => {
+      window.removeEventListener('pointerdown', handleWindowPointerDown)
+      window.removeEventListener('pointermove', handleWindowPointerMove)
+      window.removeEventListener('pointerup', handleWindowPointerUp)
+      window.removeEventListener('pointercancel', handleWindowPointerUp)
+    }
+  }, [])
 
   const scrollTemplates = (direction: number, sliderRef: React.RefObject<HTMLDivElement | null>) => {
     const slider = sliderRef.current
@@ -1100,6 +1178,7 @@ function App() {
       <div className="review-layout">
         <div
           className="strip-preview"
+          ref={stripPreviewRef}
           style={{
             backgroundColor: frameColor,
           }}
