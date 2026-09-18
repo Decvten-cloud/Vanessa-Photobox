@@ -372,25 +372,14 @@ function App() {
     if (!photos.length) return
 
     const canvas = document.createElement('canvas')
-    const width = 420
-    // Matches the live preview's CSS (`.strip-preview { padding: 18px 16px
-    // 14px; gap: 8px }`) -- the previous 8px/4px were roughly half that,
-    // which is why photos looked bigger and tighter together than on screen.
+    const width = 360
     const padding = 16
-    const gap = 8
+    const gap = 12
     const titleFontSize = Math.max(16, width * 0.07)
-    // Reserve room based on the actual font size being drawn, plus breathing
-    // room above/below, instead of an unrelated fixed constant -- this is
-    // what let the signature overlap the last photo before.
     const titleAreaHeight = Math.round(titleFontSize * 1.8)
     const photoWidth = width - padding * 2
 
-    // Load every photo up front so the canvas can be sized to fit the real
-    // content, the same way the live preview naturally does. Previously the
-    // canvas height was a fixed width/(1/3) ratio no matter how many photos
-    // there were or their real aspect ratio, so with fewer/wider photos the
-    // leftover space got filled with a big stretch of background pattern
-    // that the on-screen preview never showed.
+
     const loadedPhotos = await Promise.all(
       photos.map((photo) => loadImage(photo.src).catch(() => null)),
     )

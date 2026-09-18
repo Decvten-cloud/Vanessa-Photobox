@@ -636,7 +636,8 @@ h1 em {
   gap: 7px;
   width: 100%;
   color: var(--ink);
-  font: 10px 'DM Mono', monospace;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-style: italic;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
