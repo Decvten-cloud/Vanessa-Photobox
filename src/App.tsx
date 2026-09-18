@@ -24,6 +24,7 @@ type Sticker = {
   symbol: string
   x: number
   y: number
+  scale?: number
 }
 
 const frameColors = [
@@ -74,6 +75,31 @@ function App() {
   )
   const [stickers, setStickers] = useState<Sticker[]>([])
   const [error, setError] = useState('')
+
+  const lastTapRef = useRef<Record<string, number>>({})
+  const dragOriginRef = useRef<
+    Record<
+      string,
+      {
+        pointerId: number
+        startX: number
+        startY: number
+        stickerX: number
+        stickerY: number
+        moved: boolean
+      }
+    >
+  >({})
+  const stickerGestureRef = useRef<
+    Map<
+      string,
+      {
+        points: Map<number, { x: number; y: number }>
+        baseDistance: number
+        baseScale: number
+      }
+    >
+  >(new Map())
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -228,16 +254,38 @@ function App() {
       return null
     }
 
+    const sourceWidth = video.videoWidth
+    const sourceHeight = video.videoHeight
+    const isPortrait = sourceHeight > sourceWidth
+    const cropSize = Math.min(sourceWidth, sourceHeight)
+    const offsetX = isPortrait ? (sourceWidth - cropSize) / 2 : 0
+    const offsetY = isPortrait ? (sourceHeight - cropSize) / 2 : 0
+
     const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    canvas.width = isPortrait ? cropSize : sourceWidth
+    canvas.height = isPortrait ? cropSize : sourceHeight
     const context = canvas.getContext('2d')
 
     if (!context) return null
 
     context.translate(canvas.width, 0)
     context.scale(-1, 1)
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+    if (isPortrait) {
+      context.drawImage(
+        video,
+        offsetX,
+        offsetY,
+        cropSize,
+        cropSize,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      )
+    } else {
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    }
 
     return canvas.toDataURL('image/jpeg', 0.92)
   }
@@ -376,8 +424,9 @@ function App() {
     const loadedPhotos = await Promise.all(
       photos.map((photo) => loadImage(photo.src).catch(() => null)),
     )
-    const photoSlotRatio = 1
-    const photoHeights = loadedPhotos.map(() => photoWidth * photoSlotRatio)
+    const photoHeights = loadedPhotos.map((image) =>
+      image ? photoWidth / (image.width / image.height) : photoWidth,
+    )
     const totalPhotoHeight = photoHeights.reduce((sum, height) => sum + height, 0)
 
     canvas.width = width
@@ -526,22 +575,145 @@ function App() {
           symbol,
           x: 12 + offset,
           y: 94,
+          scale: 1,
         },
       ]
     })
+  }
+
+  const removeSticker = (id: string) => {
+    setStickers((current) => current.filter((sticker) => sticker.id !== id))
   }
 
   const moveSticker = (event: React.PointerEvent<HTMLButtonElement>, id: string) => {
     const strip = event.currentTarget.closest('.strip-preview')
     if (!strip || event.buttons !== 1) return
 
+    const origin = dragOriginRef.current[id]
+    if (!origin || origin.pointerId !== event.pointerId) return
+
     const bounds = strip.getBoundingClientRect()
-    const x = Math.max(3, Math.min(97, ((event.clientX - bounds.left) / bounds.width) * 100))
-    const y = Math.max(3, Math.min(97, ((event.clientY - bounds.top) / bounds.height) * 100))
+    const deltaX = ((event.clientX - origin.startX) / bounds.width) * 100
+    const deltaY = ((event.clientY - origin.startY) / bounds.height) * 100
+
+    const nextX = Math.max(3, Math.min(97, origin.stickerX + deltaX))
+    const nextY = Math.max(3, Math.min(97, origin.stickerY + deltaY))
+
+    if (Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5) {
+      origin.moved = true
+    }
 
     setStickers((current) =>
-      current.map((sticker) => (sticker.id === id ? { ...sticker, x, y } : sticker)),
+      current.map((sticker) => (sticker.id === id ? { ...sticker, x: nextX, y: nextY } : sticker)),
     )
+  }
+
+  const handleStickerPointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    id: string,
+  ) => {
+    const currentSticker = stickers.find((sticker) => sticker.id === id)
+    const strip = event.currentTarget.closest('.strip-preview')
+
+    if (strip) {
+      dragOriginRef.current[id] = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        stickerX: currentSticker?.x ?? 50,
+        stickerY: currentSticker?.y ?? 50,
+        moved: false,
+      }
+    }
+
+    const gesture = stickerGestureRef.current.get(id) ?? {
+      points: new Map<number, { x: number; y: number }>(),
+      baseDistance: 0,
+      baseScale: 1,
+    }
+
+    gesture.points.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    })
+
+    if (gesture.points.size === 1) {
+      gesture.baseScale = currentSticker?.scale ?? 1
+    }
+
+    if (gesture.points.size === 2) {
+      const [firstPointer, secondPointer] = Array.from(gesture.points.values())
+      gesture.baseDistance = Math.hypot(
+        secondPointer.x - firstPointer.x,
+        secondPointer.y - firstPointer.y,
+      )
+      gesture.baseScale = stickers.find((sticker) => sticker.id === id)?.scale ?? 1
+    }
+
+    stickerGestureRef.current.set(id, gesture)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleStickerPointerMove = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    id: string,
+  ) => {
+    const gesture = stickerGestureRef.current.get(id)
+    const origin = dragOriginRef.current[id]
+
+    if (origin && origin.pointerId === event.pointerId) {
+      moveSticker(event, id)
+      return
+    }
+
+    if (!gesture) return
+
+    gesture.points.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    })
+
+    if (gesture.points.size >= 2 && gesture.baseDistance > 0) {
+      const [firstPointer, secondPointer] = Array.from(gesture.points.values())
+      const distance = Math.hypot(
+        secondPointer.x - firstPointer.x,
+        secondPointer.y - firstPointer.y,
+      )
+      const nextScale = Math.min(
+        2,
+        Math.max(0.5, gesture.baseScale * (distance / gesture.baseDistance)),
+      )
+
+      setStickers((current) =>
+        current.map((sticker) =>
+          sticker.id === id ? { ...sticker, scale: nextScale } : sticker,
+        ),
+      )
+      return
+    }
+  }
+
+  const handleStickerPointerUp = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    id: string,
+  ) => {
+    const now = Date.now()
+    const previousTap = lastTapRef.current[id] ?? 0
+    const origin = dragOriginRef.current[id]
+    const wasMoved = origin?.moved ?? false
+
+    if (event.pointerType === 'touch' && !wasMoved && now - previousTap < 320) {
+      removeSticker(id)
+      delete lastTapRef.current[id]
+    } else if (event.pointerType === 'touch' && !wasMoved) {
+      lastTapRef.current[id] = now
+    }
+
+    delete dragOriginRef.current[id]
+    stickerGestureRef.current.delete(id)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
   }
 
   const scrollTemplates = (direction: number, sliderRef: React.RefObject<HTMLDivElement | null>) => {
@@ -900,9 +1072,16 @@ function App() {
               <button
                 className="strip-sticker"
                 key={sticker.id}
-                style={{ left: `${sticker.x}%`, top: `${sticker.y}%` }}
-                onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
-                onPointerMove={(event) => moveSticker(event, sticker.id)}
+                style={{
+                  left: `${sticker.x}%`,
+                  top: `${sticker.y}%`,
+                  transform: `translate(-50%, -50%) scale(${sticker.scale ?? 1})`,
+                }}
+                onPointerDown={(event) => handleStickerPointerDown(event, sticker.id)}
+                onPointerMove={(event) => handleStickerPointerMove(event, sticker.id)}
+                onPointerUp={(event) => handleStickerPointerUp(event, sticker.id)}
+                onPointerLeave={(event) => handleStickerPointerUp(event, sticker.id)}
+                onDoubleClick={() => removeSticker(sticker.id)}
                 aria-label={`Move ${sticker.symbol} sticker`}
               >
                 {sticker.symbol}

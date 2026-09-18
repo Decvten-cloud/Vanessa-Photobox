@@ -596,7 +596,6 @@ h1 em {
   z-index: 1;
   display: block;
   width: 100%;
-  aspect-ratio: 1 / 1;
   overflow: hidden;
   background: #e4f2f8;
 }
@@ -605,7 +604,6 @@ h1 em {
   position: relative;
   padding: 0;
   border: 0;
-  aspect-ratio: 1 / 1;
 }
 
 .strip-photo img {
@@ -945,18 +943,22 @@ h1 em {
   }
 
   .review-layout .strip-preview {
-    width: min(100%, 320px);
-    max-height: 70vh;
+    width: min(100%, 210px);
+    height: 46vh;
     min-height: 0;
-    aspect-ratio: 3 / 5.4;
-    overflow: hidden;
+    padding: 12px 10px 10px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scroll-snap-type: y proximity;
   }
 
   .review-layout .strip-photo {
-    flex: 1 1 0;
+    flex: 0 0 auto;
     width: 100%;
     min-height: 0;
     height: auto;
+    scroll-snap-align: start;
   }
 
   .review-layout .strip-photo img {
