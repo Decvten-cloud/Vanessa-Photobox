@@ -373,24 +373,71 @@ function App() {
 
     const canvas = document.createElement('canvas')
     const width = 420
-    const targetHeight = width * 3
-    const padding = 20
-    const gap = 12
-    const titleAreaHeight = 60
+    // Matches the live preview's CSS (`.strip-preview { padding: 18px 16px
+    // 14px; gap: 8px }`) -- the previous 8px/4px were roughly half that,
+    // which is why photos looked bigger and tighter together than on screen.
+    const padding = 16
+    const gap = 8
+    const titleFontSize = Math.max(16, width * 0.07)
+    // Reserve room based on the actual font size being drawn, plus breathing
+    // room above/below, instead of an unrelated fixed constant -- this is
+    // what let the signature overlap the last photo before.
+    const titleAreaHeight = Math.round(titleFontSize * 1.8)
     const photoWidth = width - padding * 2
-    const availablePhotoHeight =
-      targetHeight - padding * 2 - titleAreaHeight - gap * (photos.length - 1)
-    const firstPhoto = await loadImage(photos[0].src).catch(() => null)
-    const photoAspectRatio = firstPhoto?.width && firstPhoto.height
-      ? firstPhoto.width / firstPhoto.height
-      : 1
-    const photoHeight = Math.min(photoWidth / photoAspectRatio, availablePhotoHeight / photos.length)
+
+    // Load every photo up front so the canvas can be sized to fit the real
+    // content, the same way the live preview naturally does. Previously the
+    // canvas height was a fixed width/(1/3) ratio no matter how many photos
+    // there were or their real aspect ratio, so with fewer/wider photos the
+    // leftover space got filled with a big stretch of background pattern
+    // that the on-screen preview never showed.
+    const loadedPhotos = await Promise.all(
+      photos.map((photo) => loadImage(photo.src).catch(() => null)),
+    )
+    const photoHeights = loadedPhotos.map((image) =>
+      image ? photoWidth / (image.width / image.height) : photoWidth,
+    )
+    const totalPhotoHeight = photoHeights.reduce((sum, height) => sum + height, 0)
 
     canvas.width = width
-    canvas.height = targetHeight
+    canvas.height = Math.round(
+      padding * 2 + titleAreaHeight + totalPhotoHeight + gap * (photos.length - 1),
+    )
 
     const context = canvas.getContext('2d')
     if (!context) return
+
+    const drawCenteredBackground = (
+      image: HTMLImageElement,
+      alpha: number,
+      zoomRatio = 1,
+    ) => {
+      // Cover-fit the image onto the canvas without distorting its aspect
+      // ratio -- this mirrors the CSS `background-size: cover` used for the
+      // same artwork in the live preview (.strip-template / .strip-overlay).
+      // A single uniform scale factor is used for both axes, so the image
+      // is only ever cropped (overflow hidden), never stretched.
+      const coverScale = Math.max(
+        canvas.width / image.width,
+        canvas.height / image.height,
+      )
+      // zoomRatio < 1 zooms in a bit further -- used to show less of the
+      // artwork on shorter strips -- without breaking the aspect ratio.
+      const scale = coverScale / zoomRatio
+      const drawWidth = image.width * scale
+      const drawHeight = image.height * scale
+
+      context.save()
+      context.globalAlpha = alpha
+      context.drawImage(
+        image,
+        (canvas.width - drawWidth) / 2,
+        (canvas.height - drawHeight) / 2,
+        drawWidth,
+        drawHeight,
+      )
+      context.restore()
+    }
 
     context.fillStyle = frameColor
     context.fillRect(0, 0, canvas.width, canvas.height)
@@ -403,23 +450,11 @@ function App() {
       const backgroundImage = await loadImage(selectedTemplate.image).catch(() => null)
 
       if (backgroundImage) {
-        const scale = Math.max(
-          canvas.width / backgroundImage.width,
-          canvas.height / backgroundImage.height,
-        )
-        const imageWidth = backgroundImage.width * scale
-        const imageHeight = backgroundImage.height * scale
-
-        context.save()
-        context.globalAlpha = 0.9
-        context.drawImage(
+        drawCenteredBackground(
           backgroundImage,
-          (canvas.width - imageWidth) / 2,
-          (canvas.height - imageHeight) / 2,
-          imageWidth,
-          imageHeight,
+          0.9,
+          photos.length <= 3 ? 0.82 : 1,
         )
-        context.restore()
       }
     }
 
@@ -431,57 +466,69 @@ function App() {
       const backgroundImage = await loadImage(selectedStripBackground.image).catch(() => null)
 
       if (backgroundImage) {
-        const scale = Math.max(
-          canvas.width / backgroundImage.width,
-          canvas.height / backgroundImage.height,
-        )
-        const imageWidth = backgroundImage.width * scale
-        const imageHeight = backgroundImage.height * scale
-
-        context.save()
-        context.globalAlpha = 0.8
-        context.drawImage(
+        drawCenteredBackground(
           backgroundImage,
-          (canvas.width - imageWidth) / 2,
-          (canvas.height - imageHeight) / 2,
-          imageWidth,
-          imageHeight,
+          0.8,
+          photos.length <= 3 ? 0.78 : 1,
         )
-        context.restore()
       }
     }
 
-    for (const [index, photo] of photos.entries()) {
-      const image = await loadImage(photo.src).catch(() => null)
+    let cursorY = padding
+    for (const [index, image] of loadedPhotos.entries()) {
       if (!image) continue
 
-      const y = padding + index * (photoHeight + gap)
+      const slotHeight = photoHeights[index]
       const scale = Math.max(
         photoWidth / image.width,
-        photoHeight / image.height,
+        slotHeight / image.height,
       )
       const imageWidth = image.width * scale
       const imageHeight = image.height * scale
 
       context.save()
       context.beginPath()
-      context.rect(padding, y, width - padding * 2, photoHeight)
+      context.rect(padding, cursorY, photoWidth, slotHeight)
       context.clip()
       context.drawImage(
         image,
-        (width - imageWidth) / 2,
-        y + (photoHeight - imageHeight) / 2,
+        padding + (photoWidth - imageWidth) / 2,
+        cursorY + (slotHeight - imageHeight) / 2,
         imageWidth,
         imageHeight,
       )
       context.restore()
+
+      cursorY += slotHeight + gap
     }
 
     context.fillStyle = '#29344f'
     context.textAlign = 'center'
-    const titleFontSize = Math.max(16, width * 0.07)
-    context.font = `600 italic ${titleFontSize}px "Playfair Display", Georgia, serif`
-    context.fillText("VANESSA'S PHOTOBOX", width / 2, canvas.height - 42)
+    context.textBaseline = 'middle'
+    const titleFont = `600 italic ${titleFontSize}px "Playfair Display", Georgia, serif`
+
+    // Canvas text doesn't wait for web fonts the way normal page text does --
+    // without this, fillText can silently fall back to a generic serif if
+    // this exact weight/style hasn't finished loading at the moment the
+    // button is clicked, which is what produced the wrong-looking font.
+    try {
+      await document.fonts.load(titleFont)
+    } catch {
+      // If the Font Loading API isn't available, fall back to whatever the
+      // browser substitutes rather than failing the whole export.
+    }
+
+    context.font = titleFont
+    // Centered within the reserved band below the photos, instead of a
+    // hardcoded distance from the bottom edge that didn't account for how
+    // tall that band actually is -- that mismatch is what made the text
+    // overlap the last photo.
+    context.fillText(
+      "VANESSA'S PHOTOBOX",
+      width / 2,
+      canvas.height - titleAreaHeight / 2,
+    )
+    context.textBaseline = 'alphabetic'
     context.font = '32px Arial'
 
     stickers.forEach((sticker) => {
@@ -961,7 +1008,7 @@ function App() {
       </div>
       <div className="review-actions">
         <button className="primary-button" onClick={() => void downloadStrip()}>
-          Download PNG <span>↓</span>
+          Download PNG <span></span>
         </button>
         <button className="text-button" onClick={reset}>
           Start over
