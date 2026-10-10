@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Moveable from 'react-moveable'
 import './App.css'
 import countdownSound from './soundeffect/5 second countdown with sound effect - RG SACHIN.mp3'
@@ -87,14 +87,20 @@ function App() {
     useState<HTMLDivElement | null>(null)
   const [error, setError] = useState('')
 
+  const nextStickerId = useRef(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
   const templateSliderRef = useRef<HTMLDivElement>(null)
   const stripPreviewRef = useRef<HTMLDivElement>(null)
   const stickerLayerRef = useRef<HTMLDivElement>(null)
+  const moveableRef = useRef<Moveable | null>(null)
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
   const shutterAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  useLayoutEffect(() => {
+    moveableRef.current?.updateRect()
+  }, [selectedStickerElement, selectedStickerId, stickers])
 
   const findCameraDevices = async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -635,10 +641,11 @@ function App() {
     }
 
     const offset = stickers.length * 12
+    const id = `${option.id}-${++nextStickerId.current}`
     setStickers((current) => [
       ...current,
       {
-        id: `${option.id}-${Date.now()}`,
+        id,
         optionId: option.id,
         type: option.type,
         symbol: option.symbol ?? '',
@@ -648,6 +655,8 @@ function App() {
         scale: 1,
       },
     ])
+    setSelectedStickerElement(null)
+    setSelectedStickerId(id)
   }
 
   const removeSticker = (id: string) => {
@@ -1099,6 +1108,13 @@ function App() {
               >
                 <button
                   className={`strip-sticker${sticker.type === 'image' ? ' image-sticker' : ''}`}
+                  ref={(element) => {
+                    if (element && sticker.id === selectedStickerId) {
+                      setSelectedStickerElement((current) =>
+                        current === element ? current : element,
+                      )
+                    }
+                  }}
                   data-sticker-id={sticker.id}
                   style={{
                     width: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
@@ -1129,9 +1145,8 @@ function App() {
         </div>
         {selectedStickerId && selectedStickerElement && (
           <Moveable
-            key={JSON.stringify(
-              stickers.find((sticker) => sticker.id === selectedStickerId),
-            )}
+            ref={moveableRef}
+            key={selectedStickerId}
             target={selectedStickerElement}
             container={stickerControlsContainer}
             rootContainer={stickerControlsContainer}
