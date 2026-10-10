@@ -344,6 +344,18 @@ h1 em {
   margin-bottom: 6px;
 }
 
+.capture-back-button {
+  display: block;
+  width: min(100%, 680px);
+  margin: 0 auto;
+  padding: 0 0 4px;
+  text-align: left;
+}
+
+.capture-back-button + .capture-eyebrow {
+  margin-top: 8px;
+}
+
 .capture-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
@@ -542,6 +554,7 @@ h1 em {
 }
 
 .review-layout {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(230px, 300px) minmax(260px, 1fr);
   gap: 38px;
@@ -563,9 +576,7 @@ h1 em {
   padding: 18px 16px 14px;
   overflow: hidden;
   box-shadow: 0 10px 25px rgba(66, 43, 29, 0.12);
-  /* A pinch's second finger often lands elsewhere on the strip (not on the
-     sticker itself); this stops the browser's own pinch-zoom/scroll from
-     kicking in and fighting the sticker's own scale gesture. */
+  /* Keep browser gestures from competing with Moveable's touch controls. */
   touch-action: none;
 }
 
@@ -654,46 +665,46 @@ h1 em {
   pointer-events: none;
 }
 
-.strip-sticker {
+.sticker-anchor {
   position: absolute;
-  width: 34px;
-  height: 34px;
+  z-index: 0;
+  transform: translate(-50%, -50%);
+}
+
+.sticker-anchor.selected-sticker {
+  z-index: 2;
+}
+
+.strip-sticker {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
-  border: 1px solid rgba(41, 52, 79, 0.18);
+  border: 0;
   border-radius: 50%;
   color: var(--ink);
   background: rgba(255, 250, 253, 0.82);
   box-shadow: 0 3px 8px rgba(41, 52, 79, 0.16);
   cursor: grab;
-  font-size: 20px;
   line-height: 1;
   pointer-events: auto;
   touch-action: none;
-  transform: translate(-50%, -50%);
   user-select: none;
 }
 
 .strip-sticker:active {
   cursor: grabbing;
-  transform: translate(-50%, -50%) scale(1.08);
 }
 
-/* Image-based stickers (png/jpg/jpeg/svg): drop the circular emoji frame
-   and background fill so transparent artwork shows its real silhouette
-   instead of getting clipped into a blob. Pinch-to-scale still applies via
-   the inline transform set in App.tsx -- this only changes the shape. */
+/* Image stickers keep their artwork silhouette while Moveable controls the
+   element's dimensions and transform. */
 .strip-sticker.image-sticker {
-  width: 56px;
-  height: 56px;
   padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.strip-sticker.image-sticker:active {
-  transform: translate(-50%, -50%) scale(1.08);
 }
 
 .strip-sticker.image-sticker img {
@@ -703,6 +714,16 @@ h1 em {
   object-fit: contain;
   pointer-events: none;
   user-select: none;
+}
+
+.moveable-control-box {
+  z-index: 20;
+}
+
+.sticker-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .strip-signature b {
