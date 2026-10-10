@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Moveable from 'react-moveable'
 import './App.css'
 import countdownSound from './soundeffect/5 second countdown with sound effect - RG SACHIN.mp3'
 import shutterSound from './soundeffect/camera click soundeffect.wav'
@@ -29,7 +30,11 @@ type Sticker = {
   x: number
   y: number
   scale?: number
+  rotation?: number
 }
+
+const getStickerBaseSize = (sticker: Sticker) =>
+  sticker.type === 'image' ? 56 : 34
 
 const frameColors = [
   { name: 'White', value: '#ffffff' },
@@ -76,55 +81,20 @@ function App() {
     templateOptions[0]?.id ?? '',
   )
   const [stickers, setStickers] = useState<Sticker[]>([])
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
+  const [selectedStickerElement, setSelectedStickerElement] = useState<HTMLButtonElement | null>(null)
+  const [stickerControlsContainer, setStickerControlsContainer] =
+    useState<HTMLDivElement | null>(null)
   const [error, setError] = useState('')
-
-  const lastTapRef = useRef<Record<string, number>>({})
-  const dragOriginRef = useRef<
-    Record<
-      string,
-      {
-        pointerId: number
-        startX: number
-        startY: number
-        stickerX: number
-        stickerY: number
-        moved: boolean
-      }
-    >
-  >({})
-  const stickerGestureRef = useRef<
-    Map<
-      string,
-      {
-        points: Map<number, { x: number; y: number }>
-        baseDistance: number
-        baseScale: number
-      }
-    >
-  >(new Map())
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
   const templateSliderRef = useRef<HTMLDivElement>(null)
   const stripPreviewRef = useRef<HTMLDivElement>(null)
+  const stickerLayerRef = useRef<HTMLDivElement>(null)
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
   const shutterAudioRef = useRef<HTMLAudioElement | null>(null)
-
-  // Which sticker (if any) is currently being touch-dragged or pinched. A
-  // pinch's second finger almost never lands back on the sticker's own
-  // small button, so once a touch gesture starts we track it at the window
-  // level instead of only on the button -- this ref is how the window
-  // listeners below know which sticker to apply the gesture to.
-  const activeStickerIdRef = useRef<string | null>(null)
-
-  // Always-current copy of `stickers`, read inside the window listeners
-  // below so that effect can be registered once (empty deps) instead of
-  // re-attaching on every scale/position update.
-  const stickersRef = useRef<Sticker[]>([])
-  useEffect(() => {
-    stickersRef.current = stickers
-  }, [stickers])
 
   const findCameraDevices = async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -375,7 +345,7 @@ function App() {
   const rejectPendingPhoto = () => {
     setPendingPhoto(null)
     setCountdown(5)
-    setStep('countdown')
+    setStep('capture')
   }
 
   const startRetake = (index: number) => {
@@ -385,38 +355,83 @@ function App() {
     setPendingPhoto(null)
     setCurrentShot(index)
     setCountdown(5)
-    setStep('countdown')
+    setError('')
+    setStep('capture')
   }
 
-  const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+  const returnToPreview = () => {
+    setRetakeIndex(null)
+    setPendingPhoto(null)
+    setCountdown(5)
+    setError('')
+    setStep('review')
+  }
 
-    if (!file || !file.type.startsWith('image/')) return
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (!files.length) return
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      const photo: Photo = {
-        id: Date.now(),
-        src: String(reader.result),
-        label:
-          retakeIndex !== null
-            ? `Photo ${retakeIndex + 1}`
-            : 'Uploaded photo',
-      }
-
-      if (retakeIndex !== null) {
-        replacePhotoAtIndex(retakeIndex, photo)
-        setRetakeIndex(null)
-      } else {
-        setPhotos((current) =>
-          current.length < templateCount ? [...current, photo] : current,
-        )
-      }
-      setStep('review')
+    setError('')
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+    if (!imageFiles.length) {
+      setError('Please choose an image file.')
+      return
     }
 
-    reader.readAsDataURL(file)
-    event.target.value = ''
+    const readFile = (file: File) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result)
+          } else {
+            reject(new Error(`Unable to read ${file.name}.`))
+          }
+        }
+        reader.onerror = () => reject(reader.error ?? new Error(`Unable to read ${file.name}.`))
+        reader.readAsDataURL(file)
+      })
+
+    try {
+      if (retakeIndex !== null) {
+        const src = await readFile(imageFiles[0])
+        replacePhotoAtIndex(retakeIndex, {
+          id: Date.now(),
+          src,
+          label: `Photo ${retakeIndex + 1}`,
+        })
+        setRetakeIndex(null)
+        setStep('review')
+        return
+      }
+
+      const remainingSlots = templateCount - photos.length
+      if (remainingSlots <= 0) {
+        setStep('review')
+        return
+      }
+
+      const filesToUpload = imageFiles.slice(0, remainingSlots)
+      const sources = await Promise.all(filesToUpload.map(readFile))
+      const uploadedPhotos = sources.map((src, index) => ({
+        id: Date.now() + index,
+        src,
+        label: `Photo ${photos.length + index + 1}`,
+      }))
+      const nextPhotoCount = photos.length + uploadedPhotos.length
+
+      setPhotos((current) =>
+        [...current, ...uploadedPhotos].slice(0, templateCount),
+      )
+      setCurrentShot(nextPhotoCount)
+      if (imageFiles.length > remainingSlots) {
+        setError(`Only ${remainingSlots} more photo${remainingSlots === 1 ? '' : 's'} fit in this strip.`)
+      }
+      setStep(nextPhotoCount >= templateCount ? 'review' : 'capture')
+    } catch {
+      setError('One or more selected photos could not be read. Please try again.')
+    }
   }
 
   const loadImage = (src: string) =>
@@ -562,35 +577,47 @@ function App() {
     )
     context.textBaseline = 'alphabetic'
 
-    // Stickers: image stickers are drawn with drawImage (aspect-ratio
-    // preserved, no background), emoji/text stickers keep using fillText.
-    // Both respect the sticker's pinch-to-scale `scale` value.
-    const stickerBaseSize = width * 0.19 // ~68px at a 360px-wide export
+    const stickerLayerBounds = stickerLayerRef.current?.getBoundingClientRect()
+    const exportPixelRatio = stickerLayerBounds
+      ? width / stickerLayerBounds.width
+      : 1
 
     for (const sticker of stickers) {
-      const stickerScale = sticker.scale ?? 1
+      const stickerUserScale = sticker.scale ?? 1
       const centerX = (sticker.x / 100) * width
       const centerY = (sticker.y / 100) * canvas.height
+
+      context.save()
+      context.translate(centerX, centerY)
+      context.rotate(((sticker.rotation ?? 0) * Math.PI) / 180)
 
       if (sticker.type === 'image' && sticker.src) {
         const stickerImage = await loadImage(sticker.src).catch(() => null)
         if (!stickerImage) continue
 
-        const aspect = stickerImage.width / stickerImage.height
-        const drawHeight = stickerBaseSize * stickerScale
-        const drawWidth = drawHeight * aspect
+        const previewStickerSize = getStickerBaseSize(sticker) * stickerUserScale
+        const imageFitScale = Math.min(
+          previewStickerSize / stickerImage.width,
+          previewStickerSize / stickerImage.height,
+        )
+        const drawWidth = stickerImage.width * imageFitScale * exportPixelRatio
+        const drawHeight = stickerImage.height * imageFitScale * exportPixelRatio
 
         context.drawImage(
           stickerImage,
-          centerX - drawWidth / 2,
-          centerY - drawHeight / 2,
+          -drawWidth / 2,
+          -drawHeight / 2,
           drawWidth,
           drawHeight,
         )
       } else if (sticker.symbol) {
-        context.font = `${32 * stickerScale}px Arial`
-        context.fillText(sticker.symbol, centerX, centerY)
+        context.font = `${20 * stickerUserScale * exportPixelRatio}px Arial`
+        context.textAlign = 'center'
+        context.textBaseline = 'middle'
+        context.fillText(sticker.symbol, 0, 0)
       }
+
+      context.restore()
     }
 
     const link = document.createElement('a')
@@ -600,250 +627,87 @@ function App() {
   }
 
   const toggleSticker = (option: StickerOption) => {
-    setStickers((current) => {
-      const existingSticker = current.find((sticker) => sticker.optionId === option.id)
+    const existingSticker = stickers.find((sticker) => sticker.optionId === option.id)
 
-      if (existingSticker) {
-        return current.filter((sticker) => sticker.id !== existingSticker.id)
-      }
+    if (existingSticker) {
+      removeSticker(existingSticker.id)
+      return
+    }
 
-      const offset = current.length * 12
-      return [
-        ...current,
-        {
-          id: `${option.id}-${Date.now()}`,
-          optionId: option.id,
-          type: option.type,
-          symbol: option.symbol ?? '',
-          src: option.src,
-          x: 12 + offset,
-          y: 94,
-          scale: 1,
-        },
-      ]
-    })
+    const offset = stickers.length * 12
+    setStickers((current) => [
+      ...current,
+      {
+        id: `${option.id}-${Date.now()}`,
+        optionId: option.id,
+        type: option.type,
+        symbol: option.symbol ?? '',
+        src: option.src,
+        x: 12 + offset,
+        y: 94,
+        scale: 1,
+      },
+    ])
   }
 
   const removeSticker = (id: string) => {
     setStickers((current) => current.filter((sticker) => sticker.id !== id))
+    if (selectedStickerId === id) {
+      setSelectedStickerId(null)
+      setSelectedStickerElement(null)
+    }
   }
 
-  const moveSticker = (clientX: number, clientY: number, id: string) => {
-    const strip = stripPreviewRef.current
-    const origin = dragOriginRef.current[id]
-    if (!strip || !origin) return
+  const saveStickerTransform = (target: HTMLElement | SVGElement) => {
+    if (!(target instanceof HTMLElement)) return
 
-    const bounds = strip.getBoundingClientRect()
-    const deltaX = ((clientX - origin.startX) / bounds.width) * 100
-    const deltaY = ((clientY - origin.startY) / bounds.height) * 100
+    const stickerId = target.dataset.stickerId
+    const stickerLayer = stickerLayerRef.current
+    const sticker = stickers.find((item) => item.id === stickerId)
+    if (!stickerId || !stickerLayer || !sticker) return
 
-    const nextX = Math.max(3, Math.min(97, origin.stickerX + deltaX))
-    const nextY = Math.max(3, Math.min(97, origin.stickerY + deltaY))
+    const layerBounds = stickerLayer.getBoundingClientRect()
+    const targetBounds = target.getBoundingClientRect()
+    const x = Math.max(
+      0,
+      Math.min(100, ((targetBounds.left + targetBounds.width / 2 - layerBounds.left) / layerBounds.width) * 100),
+    )
+    const y = Math.max(
+      0,
+      Math.min(100, ((targetBounds.top + targetBounds.height / 2 - layerBounds.top) / layerBounds.height) * 100),
+    )
+    const resizedWidth = Number.parseFloat(target.style.width)
+    const scale = resizedWidth / getStickerBaseSize(sticker)
+    const rotation = Number(target.dataset.rotation ?? sticker.rotation ?? 0)
 
-    if (Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5) {
-      origin.moved = true
-    }
+    target.style.transform = `rotate(${rotation}deg)`
+    target.style.fontSize = `${20 * scale}px`
 
     setStickers((current) =>
-      current.map((sticker) => (sticker.id === id ? { ...sticker, x: nextX, y: nextY } : sticker)),
+      current.map((item) =>
+        item.id === stickerId ? { ...item, x, y, scale, rotation } : item,
+      ),
     )
   }
 
-  const handleStickerPointerDown = (
-    event: React.PointerEvent<HTMLButtonElement>,
-    id: string,
+  const handleStickerResize = (
+    target: HTMLElement | SVGElement,
+    width: number,
+    height: number,
+    transform: string,
   ) => {
-    const currentSticker = stickers.find((sticker) => sticker.id === id)
+    if (!(target instanceof HTMLElement)) return
 
-    if (event.pointerType !== 'touch') {
-      // Mouse / pen: a single pointer, so plain drag on the button itself
-      // works fine and doesn't need the window-level machinery below.
-      dragOriginRef.current[id] = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        stickerX: currentSticker?.x ?? 50,
-        stickerY: currentSticker?.y ?? 50,
-        moved: false,
-      }
-      event.currentTarget.setPointerCapture(event.pointerId)
-      return
-    }
+    const sticker = stickers.find((item) => item.id === target.dataset.stickerId)
+    if (!sticker) return
 
-    // Touch: this finger might be the start of a drag, or the first half
-    // of a pinch whose second finger lands somewhere else on the screen
-    // entirely -- so from here on, window-level listeners (registered in
-    // the effect below) drive the gesture, not this button's own handlers.
-    event.preventDefault()
-    activeStickerIdRef.current = id
-
-    const gesture = stickerGestureRef.current.get(id) ?? {
-      points: new Map<number, { x: number; y: number }>(),
-      baseDistance: 0,
-      baseScale: currentSticker?.scale ?? 1,
-    }
-    gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY })
-    gesture.baseScale = currentSticker?.scale ?? 1
-    stickerGestureRef.current.set(id, gesture)
-
-    dragOriginRef.current[id] = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      stickerX: currentSticker?.x ?? 50,
-      stickerY: currentSticker?.y ?? 50,
-      moved: false,
+    target.style.width = `${width}px`
+    target.style.height = `${height}px`
+    target.style.transform = transform
+    if (sticker.type === 'emoji') {
+      target.style.fontSize = `${20 * (width / getStickerBaseSize(sticker))}px`
     }
   }
-
-  const handleStickerPointerMove = (
-    event: React.PointerEvent<HTMLButtonElement>,
-    id: string,
-  ) => {
-    // Touch gestures are handled entirely by the window-level listeners
-    // below (see the effect) so a second finger away from the button
-    // still registers; only handle mouse/pen drag here.
-    if (event.pointerType === 'touch') return
-    moveSticker(event.clientX, event.clientY, id)
-  }
-
-  const handleStickerPointerUp = (
-    event: React.PointerEvent<HTMLButtonElement>,
-    id: string,
-  ) => {
-    if (event.pointerType === 'touch') return // handled globally
-
-    delete dragOriginRef.current[id]
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-  }
-
-  // Handles touch drag + pinch-to-scale at the window level. A pinch's two
-  // fingers are usually spread apart, so the second finger's pointerdown
-  // almost never lands back on the sticker's own small button -- listening
-  // on window instead means it doesn't matter where on screen it lands.
-  useEffect(() => {
-    const getGesture = (id: string) => stickerGestureRef.current.get(id)
-
-    const handleWindowPointerDown = (event: PointerEvent) => {
-      const id = activeStickerIdRef.current
-      if (!id || event.pointerType !== 'touch') return
-
-      const gesture = getGesture(id)
-      if (!gesture || gesture.points.has(event.pointerId) || gesture.points.size !== 1) {
-        return
-      }
-
-      event.preventDefault()
-      gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY })
-
-      // Second finger just landed: switch from drag to pinch.
-      delete dragOriginRef.current[id]
-
-      const [firstPoint, secondPoint] = Array.from(gesture.points.values())
-      gesture.baseDistance = Math.hypot(
-        secondPoint.x - firstPoint.x,
-        secondPoint.y - firstPoint.y,
-      )
-      gesture.baseScale =
-        stickersRef.current.find((sticker) => sticker.id === id)?.scale ?? 1
-    }
-
-    const handleWindowPointerMove = (event: PointerEvent) => {
-      const id = activeStickerIdRef.current
-      if (!id) return
-
-      const gesture = getGesture(id)
-      const origin = dragOriginRef.current[id]
-
-      // Still just one finger down: plain drag.
-      if (origin && origin.pointerId === event.pointerId && (!gesture || gesture.points.size < 2)) {
-        event.preventDefault()
-        moveSticker(event.clientX, event.clientY, id)
-        return
-      }
-
-      if (!gesture || !gesture.points.has(event.pointerId)) return
-
-      event.preventDefault()
-      gesture.points.set(event.pointerId, { x: event.clientX, y: event.clientY })
-
-      if (gesture.points.size === 2 && gesture.baseDistance > 0) {
-        const [firstPoint, secondPoint] = Array.from(gesture.points.values())
-        const distance = Math.hypot(
-          secondPoint.x - firstPoint.x,
-          secondPoint.y - firstPoint.y,
-        )
-        const nextScale = Math.min(
-          2,
-          Math.max(0.5, gesture.baseScale * (distance / gesture.baseDistance)),
-        )
-
-        setStickers((current) =>
-          current.map((sticker) =>
-            sticker.id === id ? { ...sticker, scale: nextScale } : sticker,
-          ),
-        )
-      }
-    }
-
-    const handleWindowPointerUp = (event: PointerEvent) => {
-      const id = activeStickerIdRef.current
-      if (!id) return
-
-      const gesture = getGesture(id)
-      const origin = dragOriginRef.current[id]
-      const wasSingleFingerTap =
-        origin?.pointerId === event.pointerId &&
-        !origin.moved &&
-        (!gesture || gesture.points.size <= 1)
-
-      if (event.pointerType === 'touch' && wasSingleFingerTap) {
-        const now = Date.now()
-        const previousTap = lastTapRef.current[id] ?? 0
-
-        if (now - previousTap < 320) {
-          removeSticker(id)
-          delete lastTapRef.current[id]
-        } else {
-          lastTapRef.current[id] = now
-        }
-      }
-
-      if (origin && origin.pointerId === event.pointerId) {
-        delete dragOriginRef.current[id]
-      }
-
-      if (gesture) {
-        gesture.points.delete(event.pointerId)
-
-        if (gesture.points.size === 0) {
-          stickerGestureRef.current.delete(id)
-          activeStickerIdRef.current = null
-        } else {
-          // Dropped from two fingers back to one: end the pinch cleanly so
-          // a stray move doesn't jump the scale.
-          gesture.baseDistance = 0
-        }
-      } else {
-        activeStickerIdRef.current = null
-      }
-    }
-
-    window.addEventListener('pointerdown', handleWindowPointerDown, { passive: false })
-    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false })
-    window.addEventListener('pointerup', handleWindowPointerUp)
-    window.addEventListener('pointercancel', handleWindowPointerUp)
-
-    return () => {
-      window.removeEventListener('pointerdown', handleWindowPointerDown)
-      window.removeEventListener('pointermove', handleWindowPointerMove)
-      window.removeEventListener('pointerup', handleWindowPointerUp)
-      window.removeEventListener('pointercancel', handleWindowPointerUp)
-    }
-  }, [])
 
   const scrollTemplates = (direction: number, sliderRef: React.RefObject<HTMLDivElement | null>) => {
     const slider = sliderRef.current
@@ -943,6 +807,15 @@ function App() {
   const renderCapture = () => (
     <div className="capture-layout">
       <div className="capture-main">
+      {retakeIndex !== null && (
+        <button
+          className="text-button capture-back-button"
+          onClick={returnToPreview}
+          type="button"
+        >
+          ← Back to preview
+        </button>
+      )}
       <p className="eyebrow capture-eyebrow">
         PHOTO {currentShot + 1} OF {templateCount}
       </p>
@@ -951,7 +824,9 @@ function App() {
           ? 'Get ready...'
           : step === 'confirm'
             ? 'Keep this photo?'
-            : 'Camera is ready'}
+            : retakeIndex !== null
+              ? 'Ready to retake?'
+              : 'Camera is ready'}
       </h2>
       <div className="capture-stage">
         {step === 'confirm' && pendingPhoto ? (
@@ -1000,16 +875,23 @@ function App() {
       )}
       {step === 'capture' && (
         <button className="primary-button start-session-button" onClick={beginCapture}>
-          Start session <span>→</span>
+          {retakeIndex !== null
+            ? 'Start retake'
+            : photos.length > 0
+              ? 'Take photo'
+              : 'Start session'}{' '}
+          <span>→</span>
         </button>
       )}
       <input
         ref={uploadRef}
         type="file"
         accept="image/*"
+        multiple
         onChange={handleUpload}
         hidden
       />
+      {error && <p className="error-message" role="alert">{error}</p>}
       {cameraDevices.length > 0 && (
         <select
           className="session-camera-picker"
@@ -1124,6 +1006,9 @@ function App() {
             </button>
           ))}
         </div>
+        <small className="sticker-hint">
+          Select a sticker to move, resize, or rotate it.
+        </small>
       </div>
       <div className="customizer-group">
         <span>Template</span>
@@ -1175,7 +1060,8 @@ function App() {
       <span className="step-label">STEP 3 / 3</span>
       <h2>Your strip is looking good!</h2>
       <p>Retake a frame or make your final customizations.</p>
-      <div className="review-layout">
+      {error && <p className="error-message" role="alert">{error}</p>}
+      <div className="review-layout" ref={setStickerControlsContainer}>
         <div
           className="strip-preview"
           ref={stripPreviewRef}
@@ -1201,39 +1087,84 @@ function App() {
               <span>Retake</span>
             </button>
           ))}
-          <div className="sticker-layer" aria-label="Draggable stickers">
+          <div className="sticker-layer" ref={stickerLayerRef} aria-label="Sticker canvas">
             {stickers.map((sticker) => (
-              <button
-                className={
-                  sticker.type === 'image'
-                    ? 'strip-sticker image-sticker'
-                    : 'strip-sticker'
-                }
+              <div
+                className={`sticker-anchor${sticker.id === selectedStickerId ? ' selected-sticker' : ''}`}
                 key={sticker.id}
                 style={{
                   left: `${sticker.x}%`,
                   top: `${sticker.y}%`,
-                  transform: `translate(-50%, -50%) scale(${sticker.scale ?? 1})`,
                 }}
-                onPointerDown={(event) => handleStickerPointerDown(event, sticker.id)}
-                onPointerMove={(event) => handleStickerPointerMove(event, sticker.id)}
-                onPointerUp={(event) => handleStickerPointerUp(event, sticker.id)}
-                onPointerLeave={(event) => handleStickerPointerUp(event, sticker.id)}
-                onDoubleClick={() => removeSticker(sticker.id)}
-                aria-label="Move sticker"
               >
-                {sticker.type === 'image' ? (
-                  <img src={sticker.src} alt="" draggable={false} />
-                ) : (
-                  sticker.symbol
-                )}
-              </button>
+                <button
+                  className={`strip-sticker${sticker.type === 'image' ? ' image-sticker' : ''}`}
+                  data-sticker-id={sticker.id}
+                  style={{
+                    width: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
+                    height: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
+                    fontSize: `${20 * (sticker.scale ?? 1)}px`,
+                    transform: `rotate(${sticker.rotation ?? 0}deg)`,
+                  }}
+                  onClick={(event) => {
+                    setSelectedStickerId(sticker.id)
+                    setSelectedStickerElement(event.currentTarget)
+                  }}
+                  onDoubleClick={() => removeSticker(sticker.id)}
+                  aria-label="Select sticker"
+                  type="button"
+                >
+                  {sticker.type === 'image' ? (
+                    <img src={sticker.src} alt="" draggable={false} />
+                  ) : (
+                    sticker.symbol
+                  )}
+                </button>
+              </div>
             ))}
           </div>
           <div className="strip-signature">
             <b>VANESSA'S PHOTOBOX</b>
           </div>
         </div>
+        {selectedStickerId && selectedStickerElement && (
+          <Moveable
+            key={JSON.stringify(
+              stickers.find((sticker) => sticker.id === selectedStickerId),
+            )}
+            target={selectedStickerElement}
+            container={stickerControlsContainer}
+            rootContainer={stickerControlsContainer}
+            useAccuratePosition
+            origin={false}
+            draggable
+            resizable
+            keepRatio
+            renderDirections={['nw', 'ne', 'sw', 'se']}
+            rotatable
+            rotationPosition="top"
+            throttleRotate={0}
+            onDrag={({ target, transform }) => {
+              target.style.transform = transform
+            }}
+            onDragEnd={({ target }) => {
+              saveStickerTransform(target)
+            }}
+            onResize={({ target, width, height, drag }) => {
+              handleStickerResize(target, width, height, drag.transform)
+            }}
+            onResizeEnd={({ target }) => {
+              saveStickerTransform(target)
+            }}
+            onRotate={({ target, transform, rotation }) => {
+              target.style.transform = transform
+              target.dataset.rotation = String(rotation)
+            }}
+            onRotateEnd={({ target }) => {
+              saveStickerTransform(target)
+            }}
+          />
+        )}
         {renderCustomizer()}
       </div>
       <div className="review-actions">
