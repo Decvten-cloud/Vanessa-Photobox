@@ -559,12 +559,61 @@ h1 em {
 .review-layout {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(230px, 300px) minmax(260px, 1fr);
+  grid-template-columns: minmax(340px, 1.1fr) minmax(260px, 1fr);
   gap: 38px;
   align-items: center;
-  max-width: 780px;
+  max-width: 900px;
   margin: 40px auto 0;
   text-align: left;
+}
+
+.strip-preview-group {
+  position: relative;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.photo-retake-controls {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 96px;
+  pointer-events: none;
+}
+
+.photo-retake-button {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 7px 5px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--soft-white);
+  font: 10px 'DM Mono', monospace;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+}
+
+.photo-retake-button:hover,
+.photo-retake-button:focus-visible {
+  border-color: var(--pink);
+  color: var(--pink-dark);
+  background: #fff;
+}
+
+.photo-retake-button:focus-visible {
+  outline: 2px solid var(--pink);
+  outline-offset: 2px;
 }
 
 .strip-preview {
@@ -584,7 +633,9 @@ h1 em {
 }
 
 .review-layout .strip-preview {
+  grid-column: 2;
   width: 100%;
+  min-width: 0;
   margin: 0;
 }
 
@@ -629,23 +680,6 @@ h1 em {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-.review-layout .strip-photo span {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: rgba(41, 34, 45, 0.62);
-  opacity: 0;
-  font: 11px 'DM Mono', monospace;
-  text-transform: uppercase;
-  transition: opacity 0.2s;
-}
-
-.review-layout .strip-photo:hover span {
-  opacity: 1;
 }
 
 .strip-signature {
@@ -1010,6 +1044,23 @@ h1 em {
     flex-direction: column;
     gap: 25px;
     margin-top: 30px;
+  }
+
+  .strip-preview-group {
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 8px;
+    width: min(100%, 340px);
+    margin: 0 auto;
+  }
+
+  .photo-retake-controls {
+    width: 76px;
+  }
+
+  .photo-retake-button {
+    min-height: 34px;
+    padding: 6px 3px;
+    font-size: 9px;
   }
 
   .review-layout .strip-preview {

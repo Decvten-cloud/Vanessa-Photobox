@@ -85,6 +85,7 @@ function App() {
   const [selectedStickerElement, setSelectedStickerElement] = useState<HTMLButtonElement | null>(null)
   const [stickerControlsContainer, setStickerControlsContainer] =
     useState<HTMLDivElement | null>(null)
+  const [retakeButtonTops, setRetakeButtonTops] = useState<number[]>([])
   const [error, setError] = useState('')
 
   const nextStickerId = useRef(0)
@@ -93,6 +94,7 @@ function App() {
   const uploadRef = useRef<HTMLInputElement>(null)
   const templateSliderRef = useRef<HTMLDivElement>(null)
   const stripPreviewRef = useRef<HTMLDivElement>(null)
+  const stripPreviewGroupRef = useRef<HTMLDivElement>(null)
   const stickerLayerRef = useRef<HTMLDivElement>(null)
   const moveableRef = useRef<Moveable | null>(null)
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -101,6 +103,36 @@ function App() {
   useLayoutEffect(() => {
     moveableRef.current?.updateRect()
   }, [selectedStickerElement, selectedStickerId, stickers])
+
+  useLayoutEffect(() => {
+    const group = stripPreviewGroupRef.current
+    const preview = stripPreviewRef.current
+    if (!group || !preview) return
+
+    const updateRetakeButtonPositions = () => {
+      const groupBounds = group.getBoundingClientRect()
+      const photoElements = group.querySelectorAll<HTMLElement>('.strip-photo')
+      setRetakeButtonTops(
+        Array.from(photoElements, (photo) => {
+          const photoBounds = photo.getBoundingClientRect()
+          return photoBounds.top + photoBounds.height / 2 - groupBounds.top
+        }),
+      )
+    }
+
+    updateRetakeButtonPositions()
+    const resizeObserver = new ResizeObserver(updateRetakeButtonPositions)
+    resizeObserver.observe(group)
+    resizeObserver.observe(preview)
+    preview.addEventListener('scroll', updateRetakeButtonPositions)
+    window.addEventListener('resize', updateRetakeButtonPositions)
+
+    return () => {
+      resizeObserver.disconnect()
+      preview.removeEventListener('scroll', updateRetakeButtonPositions)
+      window.removeEventListener('resize', updateRetakeButtonPositions)
+    }
+  }, [photos, step])
 
   const findCameraDevices = async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return
@@ -1071,76 +1103,90 @@ function App() {
       <p>Retake a frame or make your final customizations.</p>
       {error && <p className="error-message" role="alert">{error}</p>}
       <div className="review-layout" ref={setStickerControlsContainer}>
-        <div
-          className="strip-preview"
-          ref={stripPreviewRef}
-          style={{
-            backgroundColor: frameColor,
-          }}
-        >
-          {selectedTemplateId && (
-            <div
-              className="strip-template"
-              style={{
-                backgroundImage: `url("${templateOptions.find((template) => template.id === selectedTemplateId)?.image}")`,
-              }}
-            />
-          )}
-          {photos.map((photo, index) => (
-            <button
-              className="strip-photo"
-              key={photo.id}
-              onClick={() => startRetake(index)}
-            >
-              <img src={photo.src} alt={photo.label} />
-              <span>Retake</span>
-            </button>
-          ))}
-          <div className="sticker-layer" ref={stickerLayerRef} aria-label="Sticker canvas">
-            {stickers.map((sticker) => (
-              <div
-                className={`sticker-anchor${sticker.id === selectedStickerId ? ' selected-sticker' : ''}`}
-                key={sticker.id}
+        <div className="strip-preview-group" ref={stripPreviewGroupRef}>
+          <aside className="photo-retake-controls" aria-label="Retake photos">
+            {photos.map((photo, index) => (
+              <button
+                className="photo-retake-button"
+                key={photo.id}
                 style={{
-                  left: `${sticker.x}%`,
-                  top: `${sticker.y}%`,
+                  top: `${retakeButtonTops[index] ?? 0}px`,
                 }}
+                onClick={() => startRetake(index)}
+                type="button"
+                aria-label={`Retake photo ${index + 1}`}
               >
-                <button
-                  className={`strip-sticker${sticker.type === 'image' ? ' image-sticker' : ''}`}
-                  ref={(element) => {
-                    if (element && sticker.id === selectedStickerId) {
-                      setSelectedStickerElement((current) =>
-                        current === element ? current : element,
-                      )
-                    }
-                  }}
-                  data-sticker-id={sticker.id}
-                  style={{
-                    width: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
-                    height: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
-                    fontSize: `${20 * (sticker.scale ?? 1)}px`,
-                    transform: `rotate(${sticker.rotation ?? 0}deg)`,
-                  }}
-                  onClick={(event) => {
-                    setSelectedStickerId(sticker.id)
-                    setSelectedStickerElement(event.currentTarget)
-                  }}
-                  onDoubleClick={() => removeSticker(sticker.id)}
-                  aria-label="Select sticker"
-                  type="button"
-                >
-                  {sticker.type === 'image' ? (
-                    <img src={sticker.src} alt="" draggable={false} />
-                  ) : (
-                    sticker.symbol
-                  )}
-                </button>
+                <span aria-hidden="true">↻</span>
+                Retake {index + 1}
+              </button>
+            ))}
+          </aside>
+          <div
+            className="strip-preview"
+            ref={stripPreviewRef}
+            style={{
+              backgroundColor: frameColor,
+            }}
+          >
+            {selectedTemplateId && (
+              <div
+                className="strip-template"
+                style={{
+                  backgroundImage: `url("${templateOptions.find((template) => template.id === selectedTemplateId)?.image}")`,
+                }}
+              />
+            )}
+            {photos.map((photo) => (
+              <div className="strip-photo" key={photo.id}>
+                <img src={photo.src} alt={photo.label} />
               </div>
             ))}
-          </div>
-          <div className="strip-signature">
-            <b>VANESSA'S PHOTOBOX</b>
+            <div className="sticker-layer" ref={stickerLayerRef} aria-label="Sticker canvas">
+              {stickers.map((sticker) => (
+                <div
+                  className={`sticker-anchor${sticker.id === selectedStickerId ? ' selected-sticker' : ''}`}
+                  key={sticker.id}
+                  style={{
+                    left: `${sticker.x}%`,
+                    top: `${sticker.y}%`,
+                  }}
+                >
+                  <button
+                    className={`strip-sticker${sticker.type === 'image' ? ' image-sticker' : ''}`}
+                    ref={(element) => {
+                      if (element && sticker.id === selectedStickerId) {
+                        setSelectedStickerElement((current) =>
+                          current === element ? current : element,
+                        )
+                      }
+                    }}
+                    data-sticker-id={sticker.id}
+                    style={{
+                      width: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
+                      height: `${getStickerBaseSize(sticker) * (sticker.scale ?? 1)}px`,
+                      fontSize: `${20 * (sticker.scale ?? 1)}px`,
+                      transform: `rotate(${sticker.rotation ?? 0}deg)`,
+                    }}
+                    onClick={(event) => {
+                      setSelectedStickerId(sticker.id)
+                      setSelectedStickerElement(event.currentTarget)
+                    }}
+                    onDoubleClick={() => removeSticker(sticker.id)}
+                    aria-label="Select sticker"
+                    type="button"
+                  >
+                    {sticker.type === 'image' ? (
+                      <img src={sticker.src} alt="" draggable={false} />
+                    ) : (
+                      sticker.symbol
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="strip-signature">
+              <b>VANESSA'S PHOTOBOX</b>
+            </div>
           </div>
         </div>
         {selectedStickerId && selectedStickerElement && (
