@@ -348,7 +348,10 @@ h1 em {
   display: block;
   width: min(100%, 680px);
   margin: 0 auto;
-  padding: 0 0 4px;
+  padding: 6px 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
   text-align: left;
 }
 
